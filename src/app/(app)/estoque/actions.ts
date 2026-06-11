@@ -363,18 +363,31 @@ export async function importProductsAction(
   for (let index = 0; index < payload.length; index += batchSize) {
     const batch = payload.slice(index, index + batchSize);
     const batchNumber = Math.floor(index / batchSize) + 1;
-    const { data: inserted, error } = await supabase
+    let result = await supabase
       .from("products")
       .insert(batch)
       .select("id");
 
-    if (error) {
-      errors.push(`Lote ${batchNumber}: ${error.message}`);
+    if (isMissingTrackStockColumn(result.error)) {
+      const legacyBatch = batch.map((product) =>
+        legacyPreparedPayload(
+          withoutTrackStock(product),
+          product.track_stock,
+        )
+      );
+      result = await supabase
+        .from("products")
+        .insert(legacyBatch)
+        .select("id");
+    }
+
+    if (result.error) {
+      errors.push(`Lote ${batchNumber}: ${result.error.message}`);
       continue;
     }
 
-    imported += inserted?.length ?? batch.length;
-    insertedIds.push(...(inserted ?? []).map((product) => product.id));
+    imported += result.data?.length ?? batch.length;
+    insertedIds.push(...(result.data ?? []).map((product) => product.id));
   }
 
   if (replaceExisting && errors.length > 0) {
@@ -431,17 +444,25 @@ export async function importProductsAction(
         const existingProduct = existingByKey.get(productImportKey(product));
         if (!existingProduct) continue;
 
-        const { error: priceError } = await supabase
+        const updatePayload = {
+          sale_price: product.sale_price,
+          track_stock: isBeverageCategory(product.category),
+          updated_by: profile.id,
+        };
+        let updateResult = await supabase
           .from("products")
-          .update({
-            sale_price: product.sale_price,
-            track_stock: isBeverageCategory(product.category),
-            updated_by: profile.id,
-          })
+          .update(updatePayload)
           .eq("id", existingProduct.id);
 
-        if (priceError) {
-          errors.push(`Nao foi possivel atualizar o preco de ${product.name}: ${priceError.message}`);
+        if (isMissingTrackStockColumn(updateResult.error)) {
+          updateResult = await supabase
+            .from("products")
+            .update(withoutTrackStock(updatePayload))
+            .eq("id", existingProduct.id);
+        }
+
+        if (updateResult.error) {
+          errors.push(`Nao foi possivel atualizar o preco de ${product.name}: ${updateResult.error.message}`);
           break;
         }
       }
