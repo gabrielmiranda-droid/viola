@@ -212,7 +212,7 @@ export default async function InventoryPage() {
 
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
         <ProductCreateForm />
-        <StockAdjustForm products={productRows} />
+        <StockAdjustForm products={activeProducts} />
       </div>
 
       <div className="mt-4">

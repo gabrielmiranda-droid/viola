@@ -33,7 +33,7 @@ type StockFilter =
   | "sem_maximo";
 
 const stockFilters: Array<{ value: StockFilter; label: string }> = [
-  { value: "todos", label: "Todos" },
+  { value: "todos", label: "Ativos" },
   { value: "baixo", label: "Baixo" },
   { value: "zerado", label: "Zerado" },
   { value: "preparados", label: "Preparados" },
@@ -183,7 +183,7 @@ function stockStatus(product: Product): { label: string; variant: BadgeTone } {
 }
 
 function matchesFilter(product: Product, filter: StockFilter) {
-  if (filter === "todos") return true;
+  if (filter === "todos") return product.active;
   if (filter === "baixo") {
     return product.active && productTracksStock(product) && Number(product.quantity) <= Number(product.min_stock);
   }
@@ -312,21 +312,27 @@ export function InventoryProducts({
   const [subcategory, setSubcategory] = useState("Todas");
   const [filter, setFilter] = useState<StockFilter>("todos");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const scopedProducts = useMemo(
+    () => products.filter((product) =>
+      filter === "inativos" ? !product.active : product.active
+    ),
+    [filter, products],
+  );
 
   const categories = useMemo(() => {
-    const counts = products.reduce<Record<string, number>>((acc, product) => {
+    const counts = scopedProducts.reduce<Record<string, number>>((acc, product) => {
       const name = productCategoryParts(product.category).category;
       acc[name] = (acc[name] ?? 0) + 1;
       return acc;
     }, {});
 
     return [
-      { name: "Todas", count: products.length },
+      { name: "Todas", count: scopedProducts.length },
       ...Object.entries(counts)
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([name, count]) => ({ name, count })),
     ];
-  }, [products]);
+  }, [scopedProducts]);
   const overflowCategories = categories.slice(9);
 
   const subcategories = useMemo(() => {
@@ -336,20 +342,20 @@ export function InventoryProducts({
       "Todas",
       ...Array.from(
         new Set(
-          products
+          scopedProducts
             .filter((product) => productCategoryParts(product.category).category === category)
             .map((product) => productCategoryParts(product.category).subcategory),
         ),
       ).sort((a, b) => a.localeCompare(b)),
     ];
-  }, [category, products]);
+  }, [category, scopedProducts]);
 
   const activeSubcategory = subcategories.includes(subcategory) ? subcategory : "Todas";
 
   const filteredProducts = useMemo(() => {
     const term = search.trim().toLowerCase();
 
-    return products.filter((product) => {
+    return scopedProducts.filter((product) => {
       const parts = productCategoryParts(product.category);
       const inCategory = category === "Todas" || parts.category === category;
       const inSubcategory = activeSubcategory === "Todas" || parts.subcategory === activeSubcategory;
@@ -362,7 +368,7 @@ export function InventoryProducts({
 
       return inCategory && inSubcategory && inFilter && inSearch;
     });
-  }, [activeSubcategory, category, filter, products, search]);
+  }, [activeSubcategory, category, filter, scopedProducts, search]);
 
   const groupedProducts = useMemo(() => {
     return filteredProducts.reduce<Record<string, Record<string, Product[]>>>((acc, product) => {
@@ -423,7 +429,14 @@ export function InventoryProducts({
               </option>
             ))}
           </Select>
-          <Select value={filter} onChange={(event) => setFilter(event.target.value as StockFilter)}>
+          <Select
+            value={filter}
+            onChange={(event) => {
+              setFilter(event.target.value as StockFilter);
+              setCategory("Todas");
+              setSubcategory("Todas");
+            }}
+          >
             {stockFilters.map((item) => (
               <option key={item.value} value={item.value}>
                 {item.label}
