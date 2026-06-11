@@ -23,6 +23,7 @@ const preparedKeywords = [
   "salgado",
   "salgados",
   "combo",
+  "acai",
 ];
 
 function normalize(value: string | null | undefined) {

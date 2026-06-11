@@ -1292,6 +1292,14 @@ export function PosTerminal({
       {activeCashTab === "vendas" ? (
         <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_430px]">
         <section className="min-w-0 space-y-3">
+          {!liveRegister ? (
+            <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-4 text-amber-100">
+              <p className="font-black">Caixa fechado</p>
+              <p className="mt-1 text-sm">
+                Abra o caixa acima para liberar os produtos e iniciar as vendas.
+              </p>
+            </div>
+          ) : null}
           <div className="sticky top-[68px] z-10 rounded-lg border border-line bg-background/95 p-3 shadow-[0_14px_36px_rgba(0,0,0,0.24)] backdrop-blur-xl lg:top-3">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3">

@@ -6,7 +6,6 @@ import { requireAdmin } from "@/lib/auth";
 import {
   defaultTrackStockForCategory,
   PREPARED_PRODUCT_FALLBACK_QUANTITY,
-  productTracksStock,
 } from "@/lib/product-stock";
 import { productImportKey } from "@/lib/product-import";
 import { createClient } from "@/lib/supabase/server";
@@ -350,6 +349,7 @@ export async function importProductsAction(
     quantity: 0,
     cost_price: 0,
     min_stock: 0,
+    track_stock: false,
     active: !replaceExisting,
     created_by: profile.id,
     updated_by: profile.id,
@@ -434,6 +434,7 @@ export async function importProductsAction(
           .from("products")
           .update({
             sale_price: product.sale_price,
+            track_stock: false,
             updated_by: profile.id,
           })
           .eq("id", existingProduct.id);
@@ -675,14 +676,14 @@ export async function applyPreparedProductsModeAction(
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("products")
-    .select("id,name,category,quantity,cost_price,sale_price,min_stock,active,updated_at");
+    .select("id,name,category,quantity,cost_price,sale_price,min_stock,track_stock,active,updated_at")
+    .eq("active", true);
 
   if (error) {
     return { ok: false, message: error.message };
   }
 
-  const preparedProducts = ((data ?? []) as unknown as Product[])
-    .filter((product) => !productTracksStock(product));
+  const preparedProducts = (data ?? []) as unknown as Product[];
 
   if (!preparedProducts.length) {
     return { ok: true, message: "Nenhum produto preparado encontrado." };
@@ -736,7 +737,7 @@ export async function applyPreparedProductsModeAction(
 
   return {
     ok: true,
-    message: `${preparedProducts.length} produto(s) preparado(s) ajustado(s).`,
+    message: `${preparedProducts.length} produto(s) liberado(s) para venda sem estoque.`,
   };
 }
 
