@@ -5,6 +5,7 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/auth";
 import {
   defaultTrackStockForCategory,
+  isBeverageCategory,
   PREPARED_PRODUCT_FALLBACK_QUANTITY,
 } from "@/lib/product-stock";
 import { productImportKey } from "@/lib/product-import";
@@ -349,7 +350,7 @@ export async function importProductsAction(
     quantity: 0,
     cost_price: 0,
     min_stock: 0,
-    track_stock: false,
+    track_stock: isBeverageCategory(product.category),
     active: !replaceExisting,
     created_by: profile.id,
     updated_by: profile.id,
@@ -434,7 +435,7 @@ export async function importProductsAction(
           .from("products")
           .update({
             sale_price: product.sale_price,
-            track_stock: false,
+            track_stock: isBeverageCategory(product.category),
             updated_by: profile.id,
           })
           .eq("id", existingProduct.id);
@@ -683,18 +684,19 @@ export async function applyPreparedProductsModeAction(
     return { ok: false, message: error.message };
   }
 
-  const preparedProducts = (data ?? []) as unknown as Product[];
+  const activeProducts = (data ?? []) as unknown as Product[];
 
-  if (!preparedProducts.length) {
-    return { ok: true, message: "Nenhum produto preparado encontrado." };
+  if (!activeProducts.length) {
+    return { ok: true, message: "Nenhum produto ativo encontrado." };
   }
 
-  for (const product of preparedProducts) {
+  for (const product of activeProducts) {
+    const trackStock = isBeverageCategory(product.category);
     const payload = {
-      quantity: 0,
-      min_stock: 0,
-      max_stock: 0,
-      track_stock: false,
+      quantity: trackStock ? Number(product.quantity) : 0,
+      min_stock: trackStock ? Number(product.min_stock) : 0,
+      max_stock: trackStock ? Number(product.max_stock ?? 0) : 0,
+      track_stock: trackStock,
       updated_by: profile.id,
     };
 
@@ -702,7 +704,7 @@ export async function applyPreparedProductsModeAction(
       supabase,
       product.id,
       payload,
-      false,
+      trackStock,
     );
 
     if (updateError) {
@@ -722,10 +724,10 @@ export async function applyPreparedProductsModeAction(
           track_stock: product.track_stock ?? null,
         },
         after: {
-          quantity: 0,
-          min_stock: 0,
-          max_stock: 0,
-          track_stock: false,
+          quantity: payload.quantity,
+          min_stock: payload.min_stock,
+          max_stock: payload.max_stock,
+          track_stock: payload.track_stock,
         },
       },
     });
@@ -737,7 +739,7 @@ export async function applyPreparedProductsModeAction(
 
   return {
     ok: true,
-    message: `${preparedProducts.length} produto(s) liberado(s) para venda sem estoque.`,
+    message: `${activeProducts.length} produto(s) ajustado(s). Somente bebidas controlam estoque.`,
   };
 }
 

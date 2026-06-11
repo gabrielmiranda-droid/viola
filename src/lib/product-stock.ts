@@ -34,13 +34,19 @@ function normalize(value: string | null | undefined) {
     .trim();
 }
 
+export function isBeverageCategory(category: string | null | undefined) {
+  return normalize(category).includes("bebida");
+}
+
 export function isPreparedCategory(category: string | null | undefined) {
+  if (isBeverageCategory(category)) return false;
+
   const normalized = normalize(category);
   return preparedKeywords.some((keyword) => normalized.includes(keyword));
 }
 
 export function defaultTrackStockForCategory(category: string | null | undefined) {
-  return !isPreparedCategory(category);
+  return isBeverageCategory(category);
 }
 
 export function productTracksStock(product: Pick<Product, "category"> & { track_stock?: boolean | null }) {

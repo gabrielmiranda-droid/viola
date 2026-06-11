@@ -203,11 +203,13 @@ export function PreparedProductsModeForm() {
     <form action={action} className="rounded-lg border border-line bg-panel p-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="font-bold">Liberar produtos para venda</h3>
-          <p className="text-sm text-muted">Remove o bloqueio de estoque dos produtos ativos do cardapio.</p>
+          <h3 className="font-bold">Aplicar regra do cardapio</h3>
+          <p className="text-sm text-muted">
+            Deixa somente bebidas com estoque; os demais produtos ficam preparados.
+          </p>
         </div>
         <Button type="submit" variant="success" disabled={pending}>
-          {pending ? "Liberando..." : "Liberar vendas"}
+          {pending ? "Ajustando..." : "Aplicar regra"}
         </Button>
       </div>
       {state.message ? (
