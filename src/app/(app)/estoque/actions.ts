@@ -619,6 +619,54 @@ export async function updateProductAction(
   return { ok: true, message: "Produto atualizado." };
 }
 
+export async function clearCatalogAction(): Promise<ActionResult<{ cleared: number }>> {
+  const profile = await requireAdmin();
+  const supabase = await createClient();
+  const { data: activeProducts, error: loadError } = await supabase
+    .from("products")
+    .select("id")
+    .eq("active", true);
+
+  if (loadError) {
+    return { ok: false, message: loadError.message };
+  }
+
+  const cleared = activeProducts?.length ?? 0;
+  if (!cleared) {
+    return {
+      ok: true,
+      message: "O cardapio ja esta vazio.",
+      data: { cleared: 0 },
+    };
+  }
+
+  const { error } = await supabase
+    .from("products")
+    .update({ active: false, updated_by: profile.id })
+    .eq("active", true);
+
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+
+  await supabase.from("audit_logs").insert({
+    user_id: profile.id,
+    action: "product.catalog_clear",
+    entity: "products",
+    metadata: { cleared },
+  });
+
+  revalidatePath("/estoque");
+  revalidatePath("/caixa");
+  revalidatePath("/admin");
+
+  return {
+    ok: true,
+    message: `${cleared} produto(s) removido(s) do cardapio ativo.`,
+    data: { cleared },
+  };
+}
+
 export async function applyPreparedProductsModeAction(
   _state: ActionResult,
 ): Promise<ActionResult> {

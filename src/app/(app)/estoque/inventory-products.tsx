@@ -6,9 +6,11 @@ import {
   useMemo,
   useRef,
   useState,
+  useTransition,
   type PointerEvent,
 } from "react";
-import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, Search, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -19,7 +21,7 @@ import { cn } from "@/lib/cn";
 import { dateTime, money, quantity } from "@/lib/format";
 import { productStockModeLabel, productTracksStock } from "@/lib/product-stock";
 import type { Product } from "@/lib/types";
-import { updateProductAction } from "./actions";
+import { clearCatalogAction, updateProductAction } from "./actions";
 import { ProductImportDialog } from "./product-import-dialog";
 
 type BadgeTone = "neutral" | "success" | "warning" | "danger" | "info";
@@ -46,6 +48,41 @@ type CategoryItem = {
   name: string;
   count: number;
 };
+
+function ClearCatalogButton({ activeCount }: { activeCount: number }) {
+  const router = useRouter();
+  const { showToast } = useToast();
+  const [pending, startTransition] = useTransition();
+
+  function clearCatalog() {
+    const confirmed = window.confirm(
+      `Zerar o cardapio agora?\n\n${activeCount} produto(s) ativo(s) serao removidos do Caixa e do Estoque. O historico de vendas sera preservado.`,
+    );
+    if (!confirmed) return;
+
+    startTransition(async () => {
+      const response = await clearCatalogAction();
+      showToast({
+        title: response.ok ? "Cardapio zerado" : "Nao foi possivel zerar",
+        message: response.message,
+        tone: response.ok ? "success" : "danger",
+      });
+
+      if (response.ok) router.refresh();
+    });
+  }
+
+  return (
+    <Button
+      variant="danger"
+      onClick={clearCatalog}
+      disabled={pending || activeCount === 0}
+    >
+      <Trash2 className="h-4 w-4" />
+      {pending ? "Zerando..." : "Zerar cardapio"}
+    </Button>
+  );
+}
 
 function CategoryRail({
   categories,
@@ -312,6 +349,10 @@ export function InventoryProducts({
   const [subcategory, setSubcategory] = useState("Todas");
   const [filter, setFilter] = useState<StockFilter>("todos");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const activeCount = useMemo(
+    () => products.filter((product) => product.active).length,
+    [products],
+  );
   const scopedProducts = useMemo(
     () => products.filter((product) =>
       filter === "inativos" ? !product.active : product.active
@@ -391,6 +432,7 @@ export function InventoryProducts({
             <p className="text-sm text-muted">Busca, filtros e grupos recolhiveis para reposicao rapida.</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <ClearCatalogButton activeCount={activeCount} />
             <ProductImportDialog products={products} />
             {!hasInventoryColumns ? (
               <Badge variant="warning">Aplicar migracao de estoque</Badge>
