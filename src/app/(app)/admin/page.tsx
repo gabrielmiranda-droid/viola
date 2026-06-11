@@ -1,0 +1,424 @@
+import { Badge } from "@/components/ui/badge";
+import { LinkButton } from "@/components/ui/button";
+import { Card, Panel } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { SectionHeader } from "@/components/ui/section-header";
+import { StatCard } from "@/components/ui/stat-card";
+import { requireAdmin } from "@/lib/auth";
+import { cashRegisterDifference, movementsByType, salesByPayment, sumMoney } from "@/lib/cash";
+import { monthRange, todayRange } from "@/lib/dates";
+import { dateTime, money, paymentLabel, quantity } from "@/lib/format";
+import { defaultTrackStockForCategory, productTracksStock } from "@/lib/product-stock";
+import { createClient } from "@/lib/supabase/server";
+import { fetchAllPages } from "@/lib/supabase/pagination";
+import { ArrowRight, Banknote, Package, ReceiptText, TrendingUp } from "lucide-react";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 20;
+
+type SaleRow = {
+  id: string;
+  total_amount: number;
+  gross_profit: number;
+  payment_method: string;
+  user_id: string;
+  cancelled_at: string | null;
+  cancellation_reason: string | null;
+  users?: { name: string | null; email: string | null } | null;
+};
+
+type ProductRow = {
+  id: string;
+  name: string;
+  category: string;
+  quantity: number;
+  min_stock: number;
+  track_stock?: boolean | null;
+};
+
+type CashRegisterRow = {
+  id: string;
+  expected_amount: number;
+  closing_amount: number | null;
+  cash_difference: number | null;
+  status: string;
+};
+
+type CashMovementRow = {
+  movement_type: "entrada" | "saida";
+  amount: number;
+};
+
+type SaleItemRow = {
+  quantity: number;
+  total_price: number;
+  product_name_snapshot: string;
+};
+
+function personName(row: { users?: { name: string | null; email: string | null } | null }) {
+  return row.users?.name || row.users?.email || "Sem nome";
+}
+
+function total(rows: SaleRow[], key: "total_amount" | "gross_profit") {
+  return sumMoney(rows.map((row) => row[key]));
+}
+
+function isMissingTrackStockColumn(error: { message?: string; code?: string } | null) {
+  return Boolean(
+    error
+      && (error.message?.toLowerCase().includes("track_stock")
+        || error.code === "PGRST204"),
+  );
+}
+
+export default async function AdminDashboardPage() {
+  await requireAdmin();
+  const supabase = await createClient();
+  const today = todayRange();
+  const month = monthRange();
+
+  const [
+    todaySalesResult,
+    monthSalesResult,
+    productStockResult,
+    cancellationsResult,
+    registersResult,
+    movementsResult,
+  ] = await Promise.all([
+    fetchAllPages<SaleRow>((from, to) =>
+      supabase
+        .from("sales")
+        .select("id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users(name,email)")
+        .eq("status", "completed")
+        .gte("created_at", today.start)
+        .lte("created_at", today.end)
+        .order("created_at", { ascending: false })
+        .range(from, to) as unknown as PromiseLike<{ data: SaleRow[] | null; error: { message: string; code?: string } | null }>,
+    ),
+    fetchAllPages<SaleRow>((from, to) =>
+      supabase
+        .from("sales")
+        .select("id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users(name,email)")
+        .eq("status", "completed")
+        .gte("created_at", month.start)
+        .lt("created_at", month.end)
+        .order("created_at", { ascending: false })
+        .range(from, to) as unknown as PromiseLike<{ data: SaleRow[] | null; error: { message: string; code?: string } | null }>,
+    ),
+    supabase
+      .from("products")
+      .select("id,name,category,quantity,min_stock,track_stock")
+      .eq("active", true)
+      .order("quantity", { ascending: true })
+      .limit(120),
+    supabase
+      .from("sales")
+      .select("id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users(name,email)")
+      .eq("status", "cancelled")
+      .order("cancelled_at", { ascending: false })
+      .limit(6),
+    supabase
+      .from("cash_registers")
+      .select("id,expected_amount,closing_amount,cash_difference,status")
+      .gte("opened_at", today.start)
+      .lte("opened_at", today.end)
+      .limit(80),
+    supabase
+      .from("cash_movements")
+      .select("movement_type,amount")
+      .gte("created_at", today.start)
+      .lte("created_at", today.end)
+      .limit(400),
+  ]);
+
+  if (todaySalesResult.error) throw todaySalesResult.error;
+  if (monthSalesResult.error) throw monthSalesResult.error;
+  if (cancellationsResult.error) throw cancellationsResult.error;
+  if (movementsResult.error) throw movementsResult.error;
+
+  const todaySales = todaySalesResult.data;
+  const monthSales = monthSalesResult.data;
+  let productStockRows = (productStockResult.data ?? []) as unknown as ProductRow[];
+
+  if (isMissingTrackStockColumn(productStockResult.error)) {
+    const fallback = await supabase
+      .from("products")
+      .select("id,name,category,quantity,min_stock")
+      .eq("active", true)
+      .order("quantity", { ascending: true });
+
+    productStockRows = ((fallback.data ?? []) as unknown as ProductRow[]).map((product) => ({
+      ...product,
+      track_stock: defaultTrackStockForCategory(product.category),
+    }));
+    if (fallback.error) throw fallback.error;
+  } else if (productStockResult.error) {
+    throw productStockResult.error;
+  }
+
+  const lowStock = productStockRows
+    .filter(productTracksStock)
+    .filter((product) => Number(product.quantity) <= Number(product.min_stock))
+    .slice(0, 8);
+  const cancellations = (cancellationsResult.data ?? []) as unknown as SaleRow[];
+  let registers = (registersResult.data ?? []) as unknown as CashRegisterRow[];
+
+  if (registersResult.error) {
+    const fallback = await supabase
+        .from("cash_registers")
+        .select("id,expected_amount,closing_amount,status")
+        .gte("opened_at", today.start)
+        .lte("opened_at", today.end)
+        .limit(80);
+
+    registers = ((fallback.data ?? []) as unknown as Omit<CashRegisterRow, "cash_difference">[])
+      .map((register) => ({ ...register, cash_difference: null }));
+    if (fallback.error) throw fallback.error;
+  }
+
+  const movements = (movementsResult.data ?? []) as unknown as CashMovementRow[];
+  const todayRevenue = total(todaySales, "total_amount");
+  const todayProfit = total(todaySales, "gross_profit");
+  const monthRevenue = total(monthSales, "total_amount");
+  const averageTicket = todaySales.length ? todayRevenue / todaySales.length : 0;
+  const expectedCash = sumMoney(registers.map((register) => register.expected_amount));
+  const closedDifference = sumMoney(
+    registers
+      .filter((register) => register.status === "closed")
+      .map((register) => cashRegisterDifference(register)),
+  );
+  const cashSales = salesByPayment(todaySales, "dinheiro");
+  const pixSales = salesByPayment(todaySales, "pix");
+  const cardSales = salesByPayment(todaySales, "cartao");
+  const cashIn = movementsByType(movements, "entrada");
+  const cashOut = movementsByType(movements, "saida");
+  const cashEntered = cashSales + cashIn;
+  const openRegisters = registers.filter((register) => register.status === "open").length;
+  const closedRegisters = registers.filter((register) => register.status === "closed").length;
+  const saleIds = todaySales.map((sale) => sale.id);
+  const itemsResult = saleIds.length
+    ? await fetchAllPages<SaleItemRow>((from, to) =>
+        supabase
+          .from("sale_items")
+          .select("quantity,total_price,product_name_snapshot")
+          .in("sale_id", saleIds)
+          .range(from, to) as unknown as PromiseLike<{ data: SaleItemRow[] | null; error: { message: string; code?: string } | null }>,
+      )
+    : { data: [] };
+  if ("error" in itemsResult && itemsResult.error) throw itemsResult.error;
+  const items = (itemsResult.data ?? []) as unknown as SaleItemRow[];
+
+  const employees = Object.values(
+    todaySales.reduce<Record<string, { name: string; total: number; count: number }>>(
+      (acc, sale) => {
+        const name = personName(sale);
+        acc[name] ??= { name, total: 0, count: 0 };
+        acc[name].total += Number(sale.total_amount ?? 0);
+        acc[name].count += 1;
+        return acc;
+      },
+      {},
+    ),
+  ).sort((a, b) => b.total - a.total);
+
+  const topProducts = Object.values(
+    items.reduce<Record<string, { name: string; total: number; quantity: number }>>(
+      (acc, item) => {
+        const name = item.product_name_snapshot || "Produto sem nome";
+        acc[name] ??= { name, total: 0, quantity: 0 };
+        acc[name].total += Number(item.total_price ?? 0);
+        acc[name].quantity += Number(item.quantity ?? 0);
+        return acc;
+      },
+      {},
+    ),
+  )
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 6);
+  const topProductTotal = topProducts[0]?.total || 1;
+
+  return (
+    <Panel>
+      <SectionHeader
+        eyebrow="Hoje"
+        title="Resumo de hoje"
+        description="O que vendeu, o que entrou, o que saiu e quanto deve ter na gaveta."
+        action={
+          <div className="flex gap-2">
+            <LinkButton href="/caixa" variant="secondary">Caixa do dia</LinkButton>
+            <LinkButton href="/relatorios" variant="secondary">
+              Historico <ArrowRight className="h-4 w-4" />
+            </LinkButton>
+          </div>
+        }
+      />
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          title="Faturamento hoje"
+          value={money(todayRevenue)}
+          note={`${todaySales.length} venda(s) em ${today.label}`}
+          icon={<TrendingUp className="h-5 w-5" />}
+        />
+        <StatCard
+          title="Vendas hoje"
+          value={quantity(todaySales.length)}
+          note={`Ticket medio ${money(averageTicket)}`}
+          icon={<ReceiptText className="h-5 w-5" />}
+          tone="success"
+        />
+        <StatCard
+          title="Lucro estimado"
+          value={money(todayProfit)}
+          note={`Mes ${month.label}: ${money(monthRevenue)}`}
+          icon={<Banknote className="h-5 w-5" />}
+          tone="success"
+        />
+        <StatCard
+          title="Estoque baixo"
+          value={quantity(lowStock.length)}
+          note={`${openRegisters} aberto(s), ${closedRegisters} fechado(s)`}
+          icon={<Package className="h-5 w-5" />}
+          tone={lowStock.length ? "warning" : "default"}
+        />
+      </div>
+
+      <Card className="mt-4 border-accent/20">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-black">Dinheiro de hoje</h2>
+            <p className="text-sm text-muted">Somando todos os caixas abertos hoje.</p>
+          </div>
+          <Badge>Na gaveta {money(expectedCash)}</Badge>
+        </div>
+        <div className="grid gap-3 md:grid-cols-4">
+          <div className="rounded-lg border border-line bg-panel-strong p-3">
+            <p className="text-sm text-muted">Entrou dinheiro</p>
+            <p className="font-bold text-green-300">{money(cashEntered)}</p>
+            <p className="mt-1 text-xs text-muted">Vendas + entradas</p>
+          </div>
+          <div className="rounded-lg border border-line bg-panel-strong p-3">
+            <p className="text-sm text-muted">Saiu dinheiro</p>
+            <p className="font-bold text-rose-200">{money(cashOut)}</p>
+            <p className="mt-1 text-xs text-muted">Retiradas/sangrias</p>
+          </div>
+          <div className="rounded-lg border border-line bg-panel-strong p-3">
+            <p className="text-sm text-muted">PIX</p>
+            <p className="font-bold">{money(pixSales)}</p>
+            <p className="mt-1 text-xs text-muted">Fora da gaveta</p>
+          </div>
+          <div className="rounded-lg border border-line bg-panel-strong p-3">
+            <p className="text-sm text-muted">Cartao</p>
+            <p className="font-bold">{money(cardSales)}</p>
+            <p className="mt-1 text-xs text-muted">Credito/debito</p>
+          </div>
+        </div>
+        <p className="mt-3 text-sm text-muted">
+          Dinheiro vendido {money(cashSales)} + entradas {money(cashIn)} - saidas {money(cashOut)}.
+          Diferenca nos caixas fechados: {money(closedDifference)}.
+        </p>
+      </Card>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-3">
+        <Card>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="font-black">Vendas por funcionario</h2>
+            <Badge>Hoje</Badge>
+          </div>
+          {employees.length ? (
+            <div className="space-y-2">
+              {employees.map((employee) => (
+                <div key={employee.name} className="flex justify-between gap-3 rounded-lg border border-line bg-panel-strong p-3">
+                  <div>
+                    <p className="font-semibold">{employee.name}</p>
+                    <p className="text-sm text-muted">{employee.count} venda(s)</p>
+                  </div>
+                  <strong>{money(employee.total)}</strong>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState>Sem vendas hoje.</EmptyState>
+          )}
+        </Card>
+
+        <Card>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="font-black">Estoque baixo</h2>
+            <Badge variant={lowStock.length ? "warning" : "success"}>{lowStock.length}</Badge>
+          </div>
+          {lowStock.length ? (
+            <div className="space-y-2">
+              {lowStock.map((product) => (
+                <div key={product.id} className="flex justify-between gap-3 rounded-lg border border-line bg-panel-strong p-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold">{product.name}</p>
+                    <p className="text-sm text-muted">{product.category}</p>
+                  </div>
+                  <span className="text-warning">{quantity(product.quantity)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState>Nada para repor.</EmptyState>
+          )}
+        </Card>
+
+        <Card>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="font-black">Produtos mais vendidos</h2>
+            <Badge>{topProducts.length}</Badge>
+          </div>
+          {topProducts.length ? (
+            <div className="space-y-3">
+              {topProducts.map((product) => (
+                <div key={product.name}>
+                  <div className="flex justify-between gap-3 text-sm">
+                    <span className="truncate font-semibold">{product.name}</span>
+                    <strong>{money(product.total)}</strong>
+                  </div>
+                  <div className="mt-2 h-2 rounded-full bg-panel-strong">
+                    <div
+                      className="h-full rounded-full bg-accent"
+                      style={{ width: `${Math.max(10, (product.total / topProductTotal) * 100)}%` }}
+                    />
+                  </div>
+                  <p className="mt-1 text-xs text-muted">{quantity(product.quantity)} vendido(s)</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState>Sem produtos vendidos hoje.</EmptyState>
+          )}
+        </Card>
+      </div>
+
+      <Card className="mt-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="font-black">Cancelamentos</h2>
+          <Badge variant={cancellations.length ? "danger" : "success"}>{cancellations.length}</Badge>
+        </div>
+        {cancellations.length ? (
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {cancellations.map((sale) => (
+              <div key={sale.id} className="rounded-lg border border-line bg-panel-strong p-3">
+                <div className="flex justify-between gap-3">
+                  <strong>{money(sale.total_amount)}</strong>
+                  <span>{paymentLabel(sale.payment_method)}</span>
+                </div>
+                <p className="mt-1 text-sm text-muted">
+                  {personName(sale)} - {dateTime(sale.cancelled_at)}
+                </p>
+                {sale.cancellation_reason ? (
+                  <p className="mt-1 text-sm">{sale.cancellation_reason}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState>Nenhum cancelamento.</EmptyState>
+        )}
+      </Card>
+    </Panel>
+  );
+}

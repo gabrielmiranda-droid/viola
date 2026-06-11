@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+:root {
+  --background: #090a0c;
+  --foreground: #f5f7fb;
+  --panel: #111318;
+  --panel-strong: #171a21;
+  --muted: #9aa4b2;
+  --line: #252b35;
+  --accent: #2f7df4;
+  --accent-2: #43d17c;
+  --danger: #f05252;
+  --warning: #f5a524;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-panel: var(--panel);
+  --color-panel-strong: var(--panel-strong);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --font-sans: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, #0d0f13 0%, #090a0c 28rem),
+    #090a0c;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  background: rgba(47, 125, 244, 0.35);
+}
+
+* {
+  scrollbar-color: #2b3340 transparent;
+}
+
+::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #2b3340;
+  background-clip: content-box;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
