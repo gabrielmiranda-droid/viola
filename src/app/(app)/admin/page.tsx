@@ -11,7 +11,16 @@ import { dateTime, money, paymentLabel, quantity } from "@/lib/format";
 import { defaultTrackStockForCategory, productTracksStock } from "@/lib/product-stock";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllPages } from "@/lib/supabase/pagination";
-import { ArrowRight, Banknote, Package, ReceiptText, TrendingUp } from "lucide-react";
+import {
+  ArrowRight,
+  Banknote,
+  BarChart2,
+  CheckCircle,
+  Package,
+  ReceiptText,
+  TrendingUp,
+  Users,
+} from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 20;
@@ -69,6 +78,13 @@ function isMissingTrackStockColumn(error: { message?: string; code?: string } | 
       && (error.message?.toLowerCase().includes("track_stock")
         || error.code === "PGRST204"),
   );
+}
+
+function getInitials(name: string) {
+  const parts = name.trim().split(/\s+/);
+  return parts.length >= 2
+    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    : name.slice(0, 2).toUpperCase();
 }
 
 export default async function AdminDashboardPage() {
@@ -292,19 +308,19 @@ export default async function AdminDashboardPage() {
           <Badge>Na gaveta {money(expectedCash)}</Badge>
         </div>
         <div className="grid gap-3 md:grid-cols-4">
-          <div className="rounded-lg border border-line bg-panel-strong p-3">
+          <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-3">
             <p className="text-sm text-muted">Entrou dinheiro</p>
             <p className="font-bold text-green-300">{money(cashEntered)}</p>
             <p className="mt-1 text-xs text-muted">Vendas + entradas</p>
           </div>
-          <div className="rounded-lg border border-line bg-panel-strong p-3">
+          <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-3">
             <p className="text-sm text-muted">Saiu dinheiro</p>
-            <p className="font-bold text-rose-200">{money(cashOut)}</p>
+            <p className="font-bold text-rose-300">{money(cashOut)}</p>
             <p className="mt-1 text-xs text-muted">Retiradas/sangrias</p>
           </div>
-          <div className="rounded-lg border border-line bg-panel-strong p-3">
+          <div className="rounded-lg border border-accent/20 bg-accent/5 p-3">
             <p className="text-sm text-muted">PIX</p>
-            <p className="font-bold">{money(pixSales)}</p>
+            <p className="font-bold text-accent">{money(pixSales)}</p>
             <p className="mt-1 text-xs text-muted">Fora da gaveta</p>
           </div>
           <div className="rounded-lg border border-line bg-panel-strong p-3">
@@ -328,17 +344,20 @@ export default async function AdminDashboardPage() {
           {employees.length ? (
             <div className="space-y-2">
               {employees.map((employee) => (
-                <div key={employee.name} className="flex justify-between gap-3 rounded-lg border border-line bg-panel-strong p-3">
-                  <div>
-                    <p className="font-semibold">{employee.name}</p>
+                <div key={employee.name} className="flex items-center gap-3 rounded-lg border border-line bg-panel-strong p-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/15 text-xs font-bold text-accent ring-1 ring-accent/20">
+                    {getInitials(employee.name)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-semibold">{employee.name}</p>
                     <p className="text-sm text-muted">{employee.count} venda(s)</p>
                   </div>
-                  <strong>{money(employee.total)}</strong>
+                  <strong className="shrink-0">{money(employee.total)}</strong>
                 </div>
               ))}
             </div>
           ) : (
-            <EmptyState>Sem vendas hoje.</EmptyState>
+            <EmptyState icon={<Users className="h-5 w-5" />} title="Sem vendas hoje" description="Nenhuma venda registrada ainda." />
           )}
         </Card>
 
@@ -349,18 +368,33 @@ export default async function AdminDashboardPage() {
           </div>
           {lowStock.length ? (
             <div className="space-y-2">
-              {lowStock.map((product) => (
-                <div key={product.id} className="flex justify-between gap-3 rounded-lg border border-line bg-panel-strong p-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold">{product.name}</p>
-                    <p className="text-sm text-muted">{product.category}</p>
+              {lowStock.map((product) => {
+                const qty = Number(product.quantity);
+                const min = Number(product.min_stock);
+                const pct = min > 0 ? Math.min(100, Math.round((qty / min) * 100)) : null;
+                return (
+                  <div key={product.id} className="rounded-lg border border-line bg-panel-strong p-3">
+                    <div className="flex justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold">{product.name}</p>
+                        <p className="text-sm text-muted">{product.category}</p>
+                      </div>
+                      <span className="shrink-0 text-warning">{quantity(qty)}</span>
+                    </div>
+                    {pct !== null ? (
+                      <div className="mt-2 h-1.5 rounded-full bg-panel">
+                        <div
+                          className="h-full rounded-full bg-warning/70"
+                          style={{ width: `${Math.max(4, pct)}%` }}
+                        />
+                      </div>
+                    ) : null}
                   </div>
-                  <span className="text-warning">{quantity(product.quantity)}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
-            <EmptyState>Nada para repor.</EmptyState>
+            <EmptyState icon={<CheckCircle className="h-5 w-5" />} title="Estoque ok" description="Nada para repor agora." />
           )}
         </Card>
 
@@ -375,11 +409,11 @@ export default async function AdminDashboardPage() {
                 <div key={product.name}>
                   <div className="flex justify-between gap-3 text-sm">
                     <span className="truncate font-semibold">{product.name}</span>
-                    <strong>{money(product.total)}</strong>
+                    <strong className="shrink-0">{money(product.total)}</strong>
                   </div>
-                  <div className="mt-2 h-2 rounded-full bg-panel-strong">
+                  <div className="mt-2 h-1.5 rounded-full bg-panel-strong">
                     <div
-                      className="h-full rounded-full bg-accent"
+                      className="h-full rounded-full bg-accent-2"
                       style={{ width: `${Math.max(10, (product.total / topProductTotal) * 100)}%` }}
                     />
                   </div>
@@ -388,7 +422,7 @@ export default async function AdminDashboardPage() {
               ))}
             </div>
           ) : (
-            <EmptyState>Sem produtos vendidos hoje.</EmptyState>
+            <EmptyState icon={<BarChart2 className="h-5 w-5" />} title="Sem vendas" description="Nenhum produto vendido hoje." />
           )}
         </Card>
       </div>
@@ -401,7 +435,7 @@ export default async function AdminDashboardPage() {
         {cancellations.length ? (
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             {cancellations.map((sale) => (
-              <div key={sale.id} className="rounded-lg border border-line bg-panel-strong p-3">
+              <div key={sale.id} className="rounded-lg border border-red-500/15 bg-red-500/5 p-3">
                 <div className="flex justify-between gap-3">
                   <strong>{money(sale.total_amount)}</strong>
                   <span>{paymentLabel(sale.payment_method)}</span>
@@ -416,7 +450,7 @@ export default async function AdminDashboardPage() {
             ))}
           </div>
         ) : (
-          <EmptyState>Nenhum cancelamento.</EmptyState>
+          <EmptyState icon={<CheckCircle className="h-5 w-5" />} title="Nenhum cancelamento" description="Todas as vendas estao ok." />
         )}
       </Card>
     </Panel>

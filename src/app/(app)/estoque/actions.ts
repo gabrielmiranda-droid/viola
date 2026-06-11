@@ -36,6 +36,7 @@ const productImportSchema = z.array(
   z.object({
     name: z.string().trim().min(2).max(200),
     category: z.string().trim().min(2).max(200),
+    sale_price: z.coerce.number().min(0).max(999999.99).default(0),
   }),
 ).min(1, "Nenhum produto para importar.").max(1000, "O limite e 1000 produtos por importacao.");
 
@@ -44,6 +45,7 @@ type ProductImportResult = {
   imported: number;
   existing: number;
   repeated: number;
+  archived: number;
   failed: number;
   errors: string[];
 };
@@ -265,6 +267,7 @@ export async function createProductAction(
 
 export async function importProductsAction(
   input: unknown,
+  replaceExisting = false,
 ): Promise<ActionResult<ProductImportResult>> {
   const profile = await requireAdmin();
   const parsed = productImportSchema.safeParse(input);
@@ -278,6 +281,7 @@ export async function importProductsAction(
         imported: 0,
         existing: 0,
         repeated: 0,
+        archived: 0,
         failed: 0,
         errors: parsed.error.issues.map((issue) => issue.message),
       },
@@ -287,7 +291,7 @@ export async function importProductsAction(
   const supabase = await createClient();
   const { data: existing, error: existingError } = await supabase
     .from("products")
-    .select("name,category");
+    .select("id,name,category,sale_price,active");
 
   if (existingError) {
     return {
@@ -298,33 +302,34 @@ export async function importProductsAction(
         imported: 0,
         existing: 0,
         repeated: 0,
+        archived: 0,
         failed: parsed.data.length,
         errors: [existingError.message],
       },
     };
   }
 
-  const existingKeys = new Set(
-    (existing ?? []).map((product) => productImportKey(product)),
+  const existingByKey = new Map(
+    (existing ?? []).map((product) => [productImportKey(product), product]),
   );
   const importKeys = new Set<string>();
   let existingCount = 0;
   let repeatedCount = 0;
   const productsToInsert = parsed.data.filter((product) => {
     const key = productImportKey(product);
-    if (existingKeys.has(key)) {
-      existingCount += 1;
-      return false;
-    }
     if (importKeys.has(key)) {
       repeatedCount += 1;
       return false;
     }
     importKeys.add(key);
+    if (existingByKey.has(key)) {
+      existingCount += 1;
+      return false;
+    }
     return true;
   });
 
-  if (!productsToInsert.length) {
+  if (!productsToInsert.length && !replaceExisting) {
     return {
       ok: true,
       message: "Nenhum produto novo para importar.",
@@ -333,6 +338,7 @@ export async function importProductsAction(
         imported: 0,
         existing: existingCount,
         repeated: repeatedCount,
+        archived: 0,
         failed: 0,
         errors: [],
       },
@@ -343,14 +349,14 @@ export async function importProductsAction(
     ...product,
     quantity: 0,
     cost_price: 0,
-    sale_price: 0,
     min_stock: 0,
-    active: true,
+    active: !replaceExisting,
     created_by: profile.id,
     updated_by: profile.id,
   }));
   const errors: string[] = [];
   let imported = 0;
+  const insertedIds: string[] = [];
   const batchSize = 100;
 
   for (let index = 0; index < payload.length; index += batchSize) {
@@ -367,6 +373,149 @@ export async function importProductsAction(
     }
 
     imported += inserted?.length ?? batch.length;
+    insertedIds.push(...(inserted ?? []).map((product) => product.id));
+  }
+
+  if (replaceExisting && errors.length > 0) {
+    await supabase.from("audit_logs").insert({
+      user_id: profile.id,
+      action: "product.catalog_replace_failed",
+      entity: "products",
+      metadata: {
+        identified: parsed.data.length,
+        staged: imported,
+        retained: existingCount,
+        repeated: repeatedCount,
+        errors,
+      },
+    });
+
+    return {
+      ok: false,
+      message: "A nova lista teve erros. O cardapio atual foi mantido.",
+      data: {
+        identified: parsed.data.length,
+        imported: 0,
+        existing: existingCount,
+        repeated: repeatedCount,
+        archived: 0,
+        failed: productsToInsert.length - imported,
+        errors,
+      },
+    };
+  }
+
+  if (replaceExisting && errors.length === 0) {
+    const previousActiveIds = (existing ?? [])
+      .filter((product) => product.active)
+      .map((product) => product.id);
+    const retainedProducts = parsed.data.filter((product) =>
+      existingByKey.has(productImportKey(product))
+    );
+    const retainedIds = retainedProducts
+      .map((product) => existingByKey.get(productImportKey(product))?.id)
+      .filter((id): id is string => Boolean(id));
+    const nextActiveIds = [...retainedIds, ...insertedIds];
+    const archived = previousActiveIds.filter((id) => !nextActiveIds.includes(id)).length;
+
+    const { error: archiveError } = await supabase
+      .from("products")
+      .update({ active: false, updated_by: profile.id })
+      .eq("active", true);
+
+    if (archiveError) {
+      errors.push(`Nao foi possivel arquivar o cardapio atual: ${archiveError.message}`);
+    } else {
+      for (const product of retainedProducts) {
+        const existingProduct = existingByKey.get(productImportKey(product));
+        if (!existingProduct) continue;
+
+        const { error: priceError } = await supabase
+          .from("products")
+          .update({
+            sale_price: product.sale_price,
+            updated_by: profile.id,
+          })
+          .eq("id", existingProduct.id);
+
+        if (priceError) {
+          errors.push(`Nao foi possivel atualizar o preco de ${product.name}: ${priceError.message}`);
+          break;
+        }
+      }
+
+      for (let index = 0; index < nextActiveIds.length; index += batchSize) {
+        if (errors.length) break;
+        const ids = nextActiveIds.slice(index, index + batchSize);
+        const { error: activateError } = await supabase
+          .from("products")
+          .update({ active: true, updated_by: profile.id })
+          .in("id", ids);
+
+        if (activateError) {
+          errors.push(`Nao foi possivel ativar o novo cardapio: ${activateError.message}`);
+          break;
+        }
+      }
+    }
+
+    if (errors.length) {
+      for (const product of retainedProducts) {
+        const existingProduct = existingByKey.get(productImportKey(product));
+        if (!existingProduct) continue;
+
+        await supabase
+          .from("products")
+          .update({
+            sale_price: existingProduct.sale_price,
+            updated_by: profile.id,
+          })
+          .eq("id", existingProduct.id);
+      }
+
+      await supabase
+        .from("products")
+        .update({ active: false, updated_by: profile.id })
+        .in("id", nextActiveIds);
+
+      for (let index = 0; index < previousActiveIds.length; index += batchSize) {
+        await supabase
+          .from("products")
+          .update({ active: true, updated_by: profile.id })
+          .in("id", previousActiveIds.slice(index, index + batchSize));
+      }
+    } else {
+      await supabase.from("audit_logs").insert({
+        user_id: profile.id,
+        action: "product.catalog_replace",
+        entity: "products",
+        metadata: {
+          identified: parsed.data.length,
+          imported,
+          retained: retainedIds.length,
+          archived,
+          repeated: repeatedCount,
+        },
+      });
+
+      revalidatePath("/estoque");
+      revalidatePath("/caixa");
+      revalidatePath("/admin");
+
+      return {
+        ok: true,
+        message: "Cardapio substituido com sucesso.",
+        data: {
+          identified: parsed.data.length,
+          imported,
+          existing: retainedIds.length,
+          repeated: repeatedCount,
+          archived,
+          failed: 0,
+          errors: [],
+        },
+      };
+    }
   }
 
   await supabase.from("audit_logs").insert({
@@ -378,6 +527,7 @@ export async function importProductsAction(
       imported,
       existing: existingCount,
       repeated: repeatedCount,
+      archived: 0,
       failed: productsToInsert.length - imported,
       errors,
     },
@@ -397,6 +547,7 @@ export async function importProductsAction(
       imported,
       existing: existingCount,
       repeated: repeatedCount,
+      archived: 0,
       failed: productsToInsert.length - imported,
       errors,
     },

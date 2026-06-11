@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, ClipboardPaste, Upload, X, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ClipboardPaste, Upload, X, XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
@@ -12,6 +12,7 @@ import {
   productImportKey,
   type ImportedProduct,
 } from "@/lib/product-import";
+import { money } from "@/lib/format";
 import type { Product } from "@/lib/types";
 import { importProductsAction } from "./actions";
 
@@ -20,6 +21,7 @@ type ImportResult = {
   imported: number;
   existing: number;
   repeated: number;
+  archived: number;
   failed: number;
   errors: string[];
 };
@@ -31,6 +33,8 @@ export function ProductImportDialog({ products }: { products: Product[] }) {
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
+  const [replaceExisting, setReplaceExisting] = useState(false);
+  const [replaceConfirmed, setReplaceConfirmed] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [pending, startTransition] = useTransition();
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -71,6 +75,7 @@ export function ProductImportDialog({ products }: { products: Product[] }) {
   const existingCount = preview.filter((product) => product.status === "existing").length;
   const repeatedCount = preview.filter((product) => product.status === "repeated").length;
   const importableCount = preview.filter((product) => product.status === "new").length;
+  const replacementCount = preview.length - repeatedCount;
 
   function closeDialog() {
     if (pending) return;
@@ -81,7 +86,12 @@ export function ProductImportDialog({ products }: { products: Product[] }) {
     setResult(null);
     startTransition(async () => {
       const response = await importProductsAction(
-        parsed.products.map(({ name, category }) => ({ name, category })),
+        parsed.products.map(({ name, category, sale_price }) => ({
+          name,
+          category,
+          sale_price,
+        })),
+        replaceExisting,
       );
 
       setResult(response.data ?? {
@@ -89,7 +99,8 @@ export function ProductImportDialog({ products }: { products: Product[] }) {
         imported: 0,
         existing: existingCount,
         repeated: repeatedCount,
-        failed: importableCount,
+        archived: 0,
+        failed: replaceExisting ? replacementCount : importableCount,
         errors: response.message ? [response.message] : [],
       });
       showToast({
@@ -98,7 +109,7 @@ export function ProductImportDialog({ products }: { products: Product[] }) {
         tone: response.ok ? "success" : "danger",
       });
 
-      if ((response.data?.imported ?? 0) > 0) {
+      if ((response.data?.imported ?? 0) > 0 || replaceExisting && response.ok) {
         router.refresh();
       }
     });
@@ -128,7 +139,7 @@ export function ProductImportDialog({ products }: { products: Product[] }) {
                   Importar Produtos
                 </h2>
                 <p className="text-sm text-muted">
-                  Cole categorias e produtos. Codigos numericos no inicio serao removidos.
+                  Cole categorias e produtos no formato Produto | preco.
                 </p>
               </div>
               <Button
@@ -155,12 +166,48 @@ export function ProductImportDialog({ products }: { products: Product[] }) {
                     setResult(null);
                   }}
                   className="min-h-80 resize-y font-mono text-sm"
-                  placeholder={"\u{1F354} Hamburgueres\n001 - X Burguer\n002 - X Salada"}
+                  placeholder={"\u{1F354} Hamburgueres\nX Burguer | 20\nX Salada | 22,50"}
                   disabled={pending}
                 />
                 <p className="mt-2 text-xs text-muted">
-                  Categorias podem iniciar com emoji ou estar escritas em maiusculas.
+                  O preco pode ser informado como 20, 20,50 ou R$ 20,50.
                 </p>
+
+                <div className="mt-4 space-y-3 rounded-lg border border-line bg-panel-strong p-3">
+                  <label className="flex items-start gap-3 text-sm">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={replaceExisting}
+                      onChange={(event) => {
+                        setReplaceExisting(event.target.checked);
+                        setReplaceConfirmed(false);
+                        setResult(null);
+                      }}
+                      disabled={pending}
+                    />
+                    <span>
+                      <strong className="block text-white">Substituir o cardapio atual</strong>
+                      Arquiva os produtos que nao estiverem na lista nova e remove suas categorias do caixa.
+                    </span>
+                  </label>
+
+                  {replaceExisting ? (
+                    <label className="flex items-start gap-3 rounded-md border border-amber-400/25 bg-amber-400/8 p-3 text-sm text-amber-100">
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        checked={replaceConfirmed}
+                        onChange={(event) => setReplaceConfirmed(event.target.checked)}
+                        disabled={pending}
+                      />
+                      <span>
+                        <AlertTriangle className="mr-1 inline h-4 w-4" />
+                        Confirmo que esta lista sera o cardapio completo deste trailer.
+                      </span>
+                    </label>
+                  ) : null}
+                </div>
               </div>
 
               <div className="min-w-0">
@@ -190,6 +237,7 @@ export function ProductImportDialog({ products }: { products: Product[] }) {
                       <tr>
                         <th className="px-3 py-2 font-semibold">Produto</th>
                         <th className="px-3 py-2 font-semibold">Categoria</th>
+                        <th className="px-3 py-2 font-semibold">Preco</th>
                         <th className="px-3 py-2 font-semibold">Status</th>
                       </tr>
                     </thead>
@@ -198,10 +246,11 @@ export function ProductImportDialog({ products }: { products: Product[] }) {
                         <PreviewRow
                           key={`${productImportKey(product)}-${index}`}
                           product={product}
+                          replaceExisting={replaceExisting}
                         />
                       )) : (
                         <tr>
-                          <td colSpan={3} className="px-3 py-10 text-center text-muted">
+                          <td colSpan={4} className="px-3 py-10 text-center text-muted">
                             Cole a lista para gerar a previa.
                           </td>
                         </tr>
@@ -217,6 +266,9 @@ export function ProductImportDialog({ products }: { products: Product[] }) {
                       <Badge variant="success">{result.imported} importado(s)</Badge>
                       <Badge variant="info">{result.existing} ja cadastrado(s)</Badge>
                       <Badge variant="warning">{result.repeated} repetido(s)</Badge>
+                      {result.archived ? (
+                        <Badge variant="neutral">{result.archived} arquivado(s)</Badge>
+                      ) : null}
                       {result.failed ? (
                         <Badge variant="danger">{result.failed} com falha</Badge>
                       ) : null}
@@ -233,7 +285,9 @@ export function ProductImportDialog({ products }: { products: Product[] }) {
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line p-4">
               <p className="text-sm text-muted">
-                Todos entram ativos, com quantidade, custo, venda e minimo iguais a 0.
+                {replaceExisting
+                  ? "Itens iguais sao reaproveitados e recebem o preco informado na lista."
+                  : "Os produtos entram ativos e ja com o preco de venda informado."}
               </p>
               <div className="flex gap-2">
                 <Button variant="ghost" onClick={closeDialog} disabled={pending}>
@@ -242,9 +296,19 @@ export function ProductImportDialog({ products }: { products: Product[] }) {
                 <Button
                   variant="success"
                   onClick={importProducts}
-                  disabled={pending || !importableCount || parsed.errors.length > 0}
+                  disabled={
+                    pending
+                    || parsed.errors.length > 0
+                    || (replaceExisting
+                      ? !replacementCount || !replaceConfirmed
+                      : !importableCount)
+                  }
                 >
-                  {pending ? "Importando..." : `Importar ${importableCount} produto(s)`}
+                  {pending
+                    ? "Importando..."
+                    : replaceExisting
+                      ? `Substituir por ${replacementCount} produto(s)`
+                      : `Importar ${importableCount} produto(s)`}
                 </Button>
               </div>
             </div>
@@ -257,18 +321,21 @@ export function ProductImportDialog({ products }: { products: Product[] }) {
 
 function PreviewRow({
   product,
+  replaceExisting,
 }: {
   product: ImportedProduct & { status: PreviewStatus };
+  replaceExisting: boolean;
 }) {
   return (
     <tr className={product.status === "new" ? undefined : "text-muted"}>
       <td className="px-3 py-2 font-medium">{product.name}</td>
       <td className="px-3 py-2">{product.category}</td>
+      <td className="whitespace-nowrap px-3 py-2">{money(product.sale_price)}</td>
       <td className="px-3 py-2">
         {product.status === "existing" ? (
           <span className="inline-flex items-center gap-1 text-blue-200">
             <CheckCircle2 className="h-4 w-4" />
-            Ja cadastrado
+            {replaceExisting ? "Preco sera atualizado" : "Ja cadastrado"}
           </span>
         ) : product.status === "repeated" ? (
           <span className="inline-flex items-center gap-1 text-amber-200">

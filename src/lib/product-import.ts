@@ -1,6 +1,7 @@
 export type ImportedProduct = {
   name: string;
   category: string;
+  sale_price: number;
 };
 
 export type ParsedProductImport = {
@@ -34,6 +35,33 @@ function cleanProductName(value: string) {
     .trim();
 }
 
+function isLegendLine(value: string) {
+  return /^p\([^)]+\)\s*[-\u2013\u2014]\s*\S+/i.test(value);
+}
+
+function parseProductLine(value: string) {
+  const separator = value.lastIndexOf("|");
+  if (separator < 0) {
+    return { name: cleanProductName(value), salePrice: 0, error: "" };
+  }
+
+  const name = cleanProductName(value.slice(0, separator));
+  const rawPrice = value.slice(separator + 1).trim();
+  const priceText = rawPrice
+    .replace(/^R\$\s*/i, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
+  const salePrice = Number(priceText);
+
+  return {
+    name,
+    salePrice,
+    error: Number.isFinite(salePrice) && salePrice >= 0
+      ? ""
+      : `preco invalido (${rawPrice || "vazio"}).`,
+  };
+}
+
 export function productImportKey(product: ImportedProduct) {
   return `${normalizeImportValue(product.category)}::${normalizeImportValue(product.name)}`;
 }
@@ -55,6 +83,7 @@ export function parseProductImport(value: string): ParsedProductImport {
   value.split(/\r?\n/).forEach((rawLine, index) => {
     const line = rawLine.trim();
     if (!line) return;
+    if (isLegendLine(line)) return;
 
     if (startsWithEmoji(line) || isUppercaseCategory(line)) {
       const nextCategory = cleanCategory(line);
@@ -66,7 +95,12 @@ export function parseProductImport(value: string): ParsedProductImport {
       return;
     }
 
-    const name = cleanProductName(line);
+    const { name, salePrice, error } = parseProductLine(line);
+    if (error) {
+      errors.push(`Linha ${index + 1}: ${error}`);
+      return;
+    }
+
     if (!category) {
       errors.push(`Linha ${index + 1}: produto sem categoria (${name}).`);
       return;
@@ -77,7 +111,7 @@ export function parseProductImport(value: string): ParsedProductImport {
       return;
     }
 
-    products.push({ name, category });
+    products.push({ name, category, sale_price: salePrice });
   });
 
   return { products, errors };
