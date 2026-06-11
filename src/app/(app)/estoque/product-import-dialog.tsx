@@ -139,7 +139,7 @@ export function ProductImportDialog({ products }: { products: Product[] }) {
                   Importar Produtos
                 </h2>
                 <p className="text-sm text-muted">
-                  Cole categorias e produtos no formato Produto | preco.
+                  Aceita Produto | preco ou produto e preco em linhas separadas.
                 </p>
               </div>
               <Button
@@ -170,7 +170,7 @@ export function ProductImportDialog({ products }: { products: Product[] }) {
                   disabled={pending}
                 />
                 <p className="mt-2 text-xs text-muted">
-                  O preco pode ser informado como 20, 20,50 ou R$ 20,50.
+                  Tambem aceita dois valores como R$15 / R$23 para criar P(H) e P(MF).
                 </p>
 
                 <div className="mt-4 space-y-3 rounded-lg border border-line bg-panel-strong p-3">

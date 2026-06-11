@@ -27,6 +27,38 @@ describe("parseProductImport", () => {
     ]);
   });
 
+  it("le produto e preco em linhas separadas", () => {
+    const result = parseProductImport(
+      "\u{1F354} Lanches Artesanais\nKids Cowboy\nR$15,00\nBandido\nR$32,00",
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(result.products).toEqual([
+      { category: "Lanches Artesanais", name: "Kids Cowboy", sale_price: 15 },
+      { category: "Lanches Artesanais", name: "Bandido", sale_price: 32 },
+    ]);
+  });
+
+  it("expande dois precos em produtos P(H) e P(MF)", () => {
+    const result = parseProductImport(
+      "\u{1F32D} Cardapio Nelore's - P(H) / P(MF)\nCachorro Quente\nR$15 / R$23",
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(result.products).toEqual([
+      {
+        category: "Lanches Tradicionais - P(H)",
+        name: "Cachorro Quente P(H)",
+        sale_price: 15,
+      },
+      {
+        category: "Lanches Tradicionais - P(MF)",
+        name: "Cachorro Quente P(MF)",
+        sale_price: 23,
+      },
+    ]);
+  });
+
   it("informa preco invalido", () => {
     const result = parseProductImport("\u{1F354} Artesanais\nKids Cowboy | quinze");
 
