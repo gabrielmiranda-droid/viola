@@ -58,6 +58,13 @@ type CashMovementRow = {
   amount: number;
 };
 
+type CashMovementAuditRow = {
+  metadata: {
+    movement_type?: string;
+    amount?: number | string;
+  } | null;
+};
+
 type SaleItemRow = {
   quantity: number;
   total_price: number;
@@ -150,7 +157,6 @@ export default async function AdminDashboardPage() {
   if (todaySalesResult.error) throw todaySalesResult.error;
   if (monthSalesResult.error) throw monthSalesResult.error;
   if (cancellationsResult.error) throw cancellationsResult.error;
-  if (movementsResult.error) throw movementsResult.error;
 
   const todaySales = todaySalesResult.data;
   const monthSales = monthSalesResult.data;
@@ -192,7 +198,25 @@ export default async function AdminDashboardPage() {
     if (fallback.error) throw fallback.error;
   }
 
-  const movements = (movementsResult.data ?? []) as unknown as CashMovementRow[];
+  let movements = (movementsResult.data ?? []) as unknown as CashMovementRow[];
+
+  if (movementsResult.error) {
+    const fallback = await supabase
+      .from("audit_logs")
+      .select("metadata")
+      .like("action", "cash_movement.%")
+      .gte("created_at", today.start)
+      .lte("created_at", today.end)
+      .limit(400);
+
+    movements = ((fallback.data ?? []) as unknown as CashMovementAuditRow[])
+      .map((row) => ({
+        movement_type: row.metadata?.movement_type === "saida" ? "saida" : "entrada",
+        amount: Number(row.metadata?.amount ?? 0),
+      }));
+
+    if (fallback.error) throw fallback.error;
+  }
   const todayRevenue = total(todaySales, "total_amount");
   const todayProfit = total(todaySales, "gross_profit");
   const monthRevenue = total(monthSales, "total_amount");

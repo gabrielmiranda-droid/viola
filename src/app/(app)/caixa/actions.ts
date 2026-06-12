@@ -209,7 +209,7 @@ export async function cashMovementAction(
   _state: ActionResult,
   formData: FormData,
 ): Promise<ActionResult> {
-  await requireRole(["admin", "caixa"]);
+  const profile = await requireRole(["admin", "caixa"]);
   const parsed = cashMovementSchema.safeParse({
     cashRegisterId: formData.get("cash_register_id"),
     movementType: formData.get("movement_type"),
@@ -234,11 +234,96 @@ export async function cashMovementAction(
   });
 
   if (error) {
+    if (isMissingRpc(error, "register_cash_movement")) {
+      const { data: register, error: registerError } = await supabase
+        .from("cash_registers")
+        .select("id,user_id,status,expected_amount")
+        .eq("id", parsed.data.cashRegisterId)
+        .single<{
+          id: string;
+          user_id: string;
+          status: string;
+          expected_amount: number;
+        }>();
+
+      if (registerError || !register) {
+        return { ok: false, message: registerError?.message ?? "Caixa nao encontrado." };
+      }
+
+      if (register.status !== "open") {
+        return { ok: false, message: "Caixa fechado." };
+      }
+
+      if (register.user_id !== profile.id && profile.role !== "admin") {
+        return { ok: false, message: "Sem permissao para movimentar este caixa." };
+      }
+
+      const before = Number(register.expected_amount);
+      const delta = parsed.data.movementType === "entrada"
+        ? parsed.data.amount
+        : -parsed.data.amount;
+      const after = Math.round((before + delta) * 100) / 100;
+
+      if (after < 0) {
+        return { ok: false, message: "Saida maior que o dinheiro esperado no caixa." };
+      }
+
+      const { data: updated, error: updateError } = await supabase
+        .from("cash_registers")
+        .update({ expected_amount: after })
+        .eq("id", register.id)
+        .eq("status", "open")
+        .eq("expected_amount", before)
+        .select("id")
+        .maybeSingle<{ id: string }>();
+
+      if (updateError || !updated) {
+        return {
+          ok: false,
+          message: updateError?.message ?? "O caixa mudou durante a operacao. Tente novamente.",
+        };
+      }
+
+      const { error: auditError } = await supabase.from("audit_logs").insert({
+        user_id: profile.id,
+        action: `cash_movement.${parsed.data.movementType}`,
+        entity: "cash_registers",
+        entity_id: register.id,
+        metadata: {
+          cash_register_id: register.id,
+          movement_type: parsed.data.movementType,
+          amount: parsed.data.amount,
+          delta,
+          reason: parsed.data.reason,
+          expected_before: before,
+          expected_after: after,
+          legacy: true,
+        },
+      });
+
+      if (auditError) {
+        await supabase
+          .from("cash_registers")
+          .update({ expected_amount: before })
+          .eq("id", register.id)
+          .eq("expected_amount", after);
+
+        return { ok: false, message: auditError.message };
+      }
+
+      revalidatePath("/caixa");
+      revalidatePath("/admin");
+      revalidatePath("/relatorios");
+
+      return {
+        ok: true,
+        message: `${movementLabel} de dinheiro registrada.`,
+      };
+    }
+
     return {
       ok: false,
-      message: isMissingRpc(error, "register_cash_movement")
-        ? "Atualize o banco com a migration de caixa antes de movimentar dinheiro."
-        : error.message,
+      message: error.message,
     };
   }
 
