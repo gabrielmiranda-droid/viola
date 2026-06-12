@@ -107,7 +107,12 @@ const cashTabs: Array<{
   icon: LucideIcon;
 }> = [
   { value: "vendas", label: "1. Vender", description: "Produtos e carrinho", icon: Layers3 },
-  { value: "movimentacao", label: "2. Entrou / saiu", description: "Dinheiro da gaveta", icon: Banknote },
+  {
+    value: "movimentacao",
+    label: "2. Movimentar gaveta",
+    description: "Entrada ou retirada manual",
+    icon: Banknote,
+  },
   { value: "fechamento", label: "3. Fechar", description: "Confere e salva", icon: ClipboardCheck },
 ];
 
@@ -340,8 +345,7 @@ function CashRegisterSummary({
   const cashOut = movementsByType(cashMovements, "saida");
   const opening = Number(register.opening_amount);
   const drawerNow = Number(register.expected_amount);
-  const cashEntered = cashSales + cashIn;
-  const digitalSales = pixSales + cardSales;
+  const soldTotal = totalSales(registerSales);
   const formulaTotal = expectedCashTotal({ opening, cashSales, cashIn, cashOut });
   const formulaDifference = drawerNow - formulaTotal;
 
@@ -356,54 +360,91 @@ function CashRegisterSummary({
             <Badge variant="success">Aberto</Badge>
           </div>
           <p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-accent">
-            Caixa atual
+            Gaveta fisica
           </p>
-          <h2 className="mt-1 text-sm font-semibold text-muted">Na gaveta agora</h2>
+          <h2 className="mt-1 text-sm font-semibold text-muted">Dinheiro disponivel agora</h2>
           <p className="mt-1 text-4xl font-black leading-none text-white">{money(drawerNow)}</p>
           <p className="mt-3 text-sm text-muted">
-            So deste caixa, aberto em {dateTime(register.opened_at)}.
+            Este valor e somente o dinheiro deste caixa, aberto em {dateTime(register.opened_at)}.
           </p>
         </div>
 
         <div className="p-4">
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-lg border border-green-400/20 bg-green-400/10 p-3">
-              <p className="text-xs font-bold uppercase tracking-[0.08em] text-green-200">
-                Entrou dinheiro
-              </p>
-              <p className="mt-1 text-xl font-black text-green-200">{money(cashEntered)}</p>
-              <p className="mt-1 text-xs text-muted">
-                Venda {money(cashSales)} + entrada {money(cashIn)}
-              </p>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="rounded-xl border border-accent/25 bg-accent/5 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.1em] text-accent">
+                    Movimento da gaveta
+                  </p>
+                  <p className="mt-1 text-sm text-muted">Somente dinheiro fisico</p>
+                </div>
+                <Badge variant="neutral">Gaveta</Badge>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                <div>
+                  <p className="text-muted">Abertura</p>
+                  <strong>{money(opening)}</strong>
+                </div>
+                <div>
+                  <p className="text-muted">Vendas em dinheiro</p>
+                  <strong className="text-green-300">+ {money(cashSales)}</strong>
+                </div>
+                <div>
+                  <p className="text-muted">Entradas manuais</p>
+                  <strong className="text-green-300">+ {money(cashIn)}</strong>
+                </div>
+                <div>
+                  <p className="text-muted">Saidas da gaveta</p>
+                  <strong className="text-rose-200">- {money(cashOut)}</strong>
+                </div>
+              </div>
+              <div className="mt-4 flex items-center justify-between border-t border-accent/20 pt-3">
+                <span className="text-sm font-bold">Saldo esperado</span>
+                <strong className="text-xl text-white">{money(drawerNow)}</strong>
+              </div>
             </div>
-            <div className="rounded-lg border border-rose-400/20 bg-rose-400/10 p-3">
-              <p className="text-xs font-bold uppercase tracking-[0.08em] text-rose-100">
-                Saiu dinheiro
+
+            <div className="rounded-xl border border-line bg-panel-strong p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.1em] text-slate-300">
+                    Vendas deste caixa
+                  </p>
+                  <p className="mt-1 text-2xl font-black">{money(soldTotal)}</p>
+                </div>
+                <Badge variant="neutral">{quantity(completed.length)} venda(s)</Badge>
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                <div className="rounded-lg border border-line bg-background/40 p-2">
+                  <p className="text-xs text-muted">Dinheiro</p>
+                  <strong className="mt-1 block text-sm">{money(cashSales)}</strong>
+                  <span className="mt-1 block text-[0.68rem] text-green-300">Entra na gaveta</span>
+                </div>
+                <div className="rounded-lg border border-line bg-background/40 p-2">
+                  <p className="text-xs text-muted">PIX</p>
+                  <strong className="mt-1 block text-sm">{money(pixSales)}</strong>
+                  <span className="mt-1 block text-[0.68rem] text-slate-400">Fora da gaveta</span>
+                </div>
+                <div className="rounded-lg border border-line bg-background/40 p-2">
+                  <p className="text-xs text-muted">Cartao</p>
+                  <strong className="mt-1 block text-sm">{money(cardSales)}</strong>
+                  <span className="mt-1 block text-[0.68rem] text-slate-400">Fora da gaveta</span>
+                </div>
+              </div>
+              <p className="mt-3 border-t border-line pt-3 text-xs text-muted">
+                PIX e cartao contam nas vendas, mas nao alteram o dinheiro fisico.
               </p>
-              <p className="mt-1 text-xl font-black text-rose-100">{money(cashOut)}</p>
-              <p className="mt-1 text-xs text-muted">Sangria, troco ou retirada</p>
-            </div>
-            <div className="rounded-lg border border-line bg-panel-strong p-3">
-              <p className="text-xs font-bold uppercase tracking-[0.08em] text-muted">
-                Vendido total
-              </p>
-              <p className="mt-1 text-xl font-black">{money(totalSales(registerSales))}</p>
-              <p className="mt-1 text-xs text-muted">{quantity(completed.length)} venda(s)</p>
-            </div>
-            <div className="rounded-lg border border-line bg-panel-strong p-3">
-              <p className="text-xs font-bold uppercase tracking-[0.08em] text-muted">
-                PIX + cartao
-              </p>
-              <p className="mt-1 text-xl font-black">{money(digitalSales)}</p>
-              <p className="mt-1 text-xs text-muted">Nao entra na gaveta</p>
             </div>
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-background/45 p-3 text-sm">
-            <span className="text-muted">Abertura {money(opening)}</span>
-            <span className="text-green-300">+ entrou {money(cashEntered)}</span>
-            <span className="text-rose-200">- saiu {money(cashOut)}</span>
-            <strong>= gaveta {money(drawerNow)}</strong>
+            <strong>Conta da gaveta:</strong>
+            <span className="text-muted">{money(opening)} abertura</span>
+            <span className="text-green-300">+ {money(cashSales)} vendas</span>
+            <span className="text-green-300">+ {money(cashIn)} entradas</span>
+            <span className="text-rose-200">- {money(cashOut)} saidas</span>
+            <strong>= {money(drawerNow)}</strong>
             {Math.abs(formulaDifference) > 0.009 ? (
               <span className="text-amber-200">Conferir {money(formulaDifference)}</span>
             ) : null}
@@ -413,7 +454,7 @@ function CashRegisterSummary({
         <div className="grid content-center gap-2 border-t border-line bg-background/35 p-4 xl:border-l xl:border-t-0">
           <Button type="button" variant="secondary" onClick={() => onSelectTab("movimentacao")}>
             <Banknote className="h-4 w-4" />
-            Entrou / saiu
+            Movimentar gaveta
           </Button>
           <Button type="button" variant="success" onClick={() => onSelectTab("fechamento")}>
             <ClipboardCheck className="h-4 w-4" />
@@ -530,7 +571,6 @@ function CashPanel({
   const unknownCardSales = cardSalesWithoutType(registerSales);
   const cashIn = movementsByType(cashMovements, "entrada");
   const cashOut = movementsByType(cashMovements, "saida");
-  const cashEntered = cashSales + cashIn;
   const expectedCash = Number(register.expected_amount);
   const expectedByFormula = expectedCashTotal({
     opening: Number(register.opening_amount),
@@ -582,10 +622,21 @@ function CashPanel({
     <Card className="overflow-hidden border-accent/15 bg-panel p-0">
       {activeTab === "movimentacao" ? (
         <div className="grid gap-4 border-t border-line bg-background/45 p-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-          <div className="grid gap-2 md:grid-cols-3 xl:col-span-2">
-            <Metric label="Entrou neste caixa" value={cashEntered} tone="good" />
-            <Metric label="Saiu neste caixa" value={cashOut} tone="bad" />
-            <Metric label="Na gaveta agora" value={expectedCash} />
+          <div className="rounded-lg border border-accent/25 bg-accent/5 p-4 xl:col-span-2">
+            <p className="text-xs font-black uppercase tracking-[0.1em] text-accent">
+              Movimentacao manual da gaveta
+            </p>
+            <p className="mt-1 text-sm text-slate-300">
+              Registre aqui somente dinheiro colocado ou retirado manualmente. Isso altera a
+              gaveta, mas nao altera o total vendido.
+            </p>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:col-span-2 xl:grid-cols-4">
+            <Metric label="Vendas em dinheiro" value={cashSales} tone="good" />
+            <Metric label="Entradas manuais" value={cashIn} tone="good" />
+            <Metric label="Saidas manuais" value={cashOut} tone="bad" />
+            <Metric label="Saldo da gaveta" value={expectedCash} />
           </div>
 
           <form action={movementAction} className="rounded-lg border border-line bg-panel-strong/70 p-4">
@@ -595,20 +646,20 @@ function CashPanel({
                 <Banknote className="h-5 w-5" />
               </div>
               <div>
-                <h3 className="font-black">Entrou / saiu dinheiro</h3>
-                <p className="text-sm text-muted">Use quando tirar ou colocar dinheiro na gaveta.</p>
+                <h3 className="font-black">Registrar movimento da gaveta</h3>
+                <p className="text-sm text-muted">Ex.: reforco de troco, sangria ou retirada.</p>
               </div>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="movement_type">Tipo</Label>
                 <Select id="movement_type" name="movement_type" defaultValue="saida">
-                  <option value="entrada">Entrada</option>
-                  <option value="saida">Saida</option>
+                  <option value="entrada">Entrada na gaveta</option>
+                  <option value="saida">Saida da gaveta</option>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="amount">Valor</Label>
+                <Label htmlFor="amount">Valor movimentado</Label>
                 <Input id="amount" name="amount" type="number" min="0.01" step="0.01" required />
               </div>
               <div className="space-y-2">
@@ -617,7 +668,7 @@ function CashPanel({
               </div>
             </div>
             <Button type="submit" variant="secondary" className="mt-4" disabled={movingCash}>
-              {movingCash ? "Registrando..." : "Registrar"}
+              {movingCash ? "Registrando..." : "Confirmar movimentacao"}
             </Button>
             <FormMessage state={movementState} />
           </form>
@@ -626,7 +677,7 @@ function CashPanel({
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="font-black">Ultimas movimentacoes</h3>
-                <p className="text-sm text-muted">Entradas e saidas registradas no caixa.</p>
+                <p className="text-sm text-muted">Somente entradas e saidas manuais da gaveta.</p>
               </div>
               <Badge variant="neutral">{quantity(cashMovements.length)}</Badge>
             </div>
@@ -641,7 +692,9 @@ function CashPanel({
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <Badge variant={movement.movement_type === "entrada" ? "success" : "warning"}>
-                          {movement.movement_type === "entrada" ? "Entrada" : "Saida"}
+                          {movement.movement_type === "entrada"
+                            ? "Entrada na gaveta"
+                            : "Saida da gaveta"}
                         </Badge>
                         <p className="mt-2 text-sm font-semibold">{movement.reason}</p>
                         <p className="mt-1 text-xs text-muted">{dateTime(movement.created_at)}</p>
@@ -690,10 +743,10 @@ function CashPanel({
             <input type="hidden" name="pix_amount" value={countedPix.toFixed(2)} />
 
             <div className="mb-4 grid gap-2 md:grid-cols-4">
-              <Metric label="Na gaveta" value={expectedCash} />
-              <Metric label="Entrou dinheiro" value={cashEntered} tone="good" />
-              <Metric label="Saiu dinheiro" value={cashOut} tone="bad" />
-              <Metric label="Formula" value={expectedByFormula} />
+              <Metric label="Saldo esperado da gaveta" value={expectedCash} />
+              <Metric label="Vendas em dinheiro" value={cashSales} tone="good" />
+              <Metric label="Entradas manuais" value={cashIn} tone="good" />
+              <Metric label="Saidas manuais" value={cashOut} tone="bad" />
             </div>
 
             {Math.abs(cashFormulaDifference) > 0.009 ? (
