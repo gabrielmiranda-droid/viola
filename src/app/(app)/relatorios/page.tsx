@@ -10,7 +10,6 @@ import {
   cardSalesByType,
   cardSalesWithoutType,
   cashFlowSummary,
-  cashRegisterDifference,
   groupSalesByMachine,
   mergeSalePaymentDetails,
   movementsByType,
@@ -24,6 +23,13 @@ import { dateTime, money, paymentLabel, quantity } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllPages } from "@/lib/supabase/pagination";
 import { CancelSaleForm } from "./cancel-sale-form";
+import {
+  Banknote,
+  Calculator,
+  CreditCard,
+  ReceiptText,
+  WalletCards,
+} from "lucide-react";
 
 type Search = {
   start?: string;
@@ -269,21 +275,6 @@ export default async function ReportsPage({
     );
   }
 
-  const completed = sales.filter((sale) => sale.status === "completed");
-  const cancelled = sales.filter((sale) => sale.status === "cancelled");
-  const completedIds = completed.map((sale) => sale.id);
-  const itemsResult = completedIds.length
-    ? await fetchAllPages<SaleItemRow>((from, to) =>
-        supabase
-          .from("sale_items")
-          .select("quantity,total_price,product_name_snapshot")
-          .in("sale_id", completedIds)
-          .range(from, to) as unknown as PromiseLike<{ data: SaleItemRow[] | null; error: { message: string; code?: string } | null }>,
-      )
-    : { data: [] };
-  if ("error" in itemsResult && itemsResult.error) throw itemsResult.error;
-  const items = (itemsResult.data ?? []) as unknown as SaleItemRow[];
-
   let registers = registersResult.data;
   if (registersResult.error) {
     const fallback = await fetchAllPages<CashRegisterRow>((from, to) =>
@@ -319,9 +310,31 @@ export default async function ReportsPage({
     if (fallback.error) throw fallback.error;
   }
 
-  const terminalClosings = terminalClosingsResult.error
+  let terminalClosings = terminalClosingsResult.error
     ? []
     : terminalClosingsResult.data;
+
+  const registerIds = new Set(registers.map((register) => register.id));
+  sales = sales.filter((sale) => registerIds.has(sale.cash_register_id));
+  movements = movements.filter((movement) => registerIds.has(movement.cash_register_id));
+  terminalClosings = terminalClosings.filter((closing) =>
+    registerIds.has(closing.cash_register_id),
+  );
+
+  const completed = sales.filter((sale) => sale.status === "completed");
+  const cancelled = sales.filter((sale) => sale.status === "cancelled");
+  const completedIds = completed.map((sale) => sale.id);
+  const itemsResult = completedIds.length
+    ? await fetchAllPages<SaleItemRow>((from, to) =>
+        supabase
+          .from("sale_items")
+          .select("quantity,total_price,product_name_snapshot")
+          .in("sale_id", completedIds)
+          .range(from, to) as unknown as PromiseLike<{ data: SaleItemRow[] | null; error: { message: string; code?: string } | null }>,
+      )
+    : { data: [] };
+  if ("error" in itemsResult && itemsResult.error) throw itemsResult.error;
+  const items = (itemsResult.data ?? []) as unknown as SaleItemRow[];
 
   const revenue = sumMoney(completed.map((sale) => sale.total_amount));
   const cost = sumMoney(completed.map((sale) => sale.total_cost));
@@ -333,34 +346,75 @@ export default async function ReportsPage({
   const creditSales = cardSalesByType(sales, "credito");
   const debitSales = cardSalesByType(sales, "debito");
   const cardSalesUnknown = cardSalesWithoutType(sales);
-  const cashIn = movementsByType(movements, "entrada");
-  const cashOut = movementsByType(movements, "saida");
-  const openingTotal = sumMoney(registers.map((register) => register.opening_amount));
-  const cashFlow = cashFlowSummary({
-    opening: openingTotal,
-    cashSales,
-    cashIn,
-    cashOut,
+  const registerSummaries = registers.map((register) => {
+    const registerSales = sales.filter(
+      (sale) => sale.cash_register_id === register.id,
+    );
+    const registerMovements = movements.filter(
+      (movement) => movement.cash_register_id === register.id,
+    );
+    const flow = cashFlowSummary({
+      opening: Number(register.opening_amount),
+      cashSales: salesByPayment(registerSales, "dinheiro"),
+      cashIn: movementsByType(registerMovements, "entrada"),
+      cashOut: movementsByType(registerMovements, "saida"),
+    });
+    const counted =
+      register.status === "closed" && register.closing_amount !== null
+        ? Number(register.closing_amount)
+        : null;
+
+    return {
+      register,
+      flow,
+      salesTotal: sumMoney(
+        registerSales
+          .filter((sale) => sale.status === "completed")
+          .map((sale) => sale.total_amount),
+      ),
+      salesCount: registerSales.filter((sale) => sale.status === "completed").length,
+      counted,
+      difference: counted === null ? 0 : counted - flow.expectedCash,
+      savedExpectedDifference:
+        Number(register.expected_amount) - flow.expectedCash,
+    };
   });
-  const expectedCash = sumMoney(registers.map((register) => register.expected_amount));
-  const expectedByFormula = cashFlow.expectedCash;
+  const cashFlow = cashFlowSummary({
+    opening: sumMoney(registerSummaries.map(({ flow }) => flow.opening)),
+    cashSales: sumMoney(registerSummaries.map(({ flow }) => flow.cashSales)),
+    cashIn: sumMoney(registerSummaries.map(({ flow }) => flow.otherCashIn)),
+    cashOut: sumMoney(registerSummaries.map(({ flow }) => flow.cashOut)),
+  });
+  const expectedCash = cashFlow.expectedCash;
   const countedCash = sumMoney(
-    registers
-      .filter((register) => register.status === "closed")
-      .map((register) => register.closing_amount ?? 0),
+    registerSummaries.map(({ counted }) => counted),
   );
   const cashDifference = sumMoney(
-    registers
-      .filter((register) => register.status === "closed")
-      .map((register) => cashRegisterDifference(register)),
+    registerSummaries.map(({ difference }) => difference),
   );
   const openRegisters = registers.filter((register) => register.status === "open").length;
   const closedRegisters = registers.filter((register) => register.status === "closed").length;
   const registersWithDifference = registers.filter(
-    (register) =>
-      register.status === "closed" && Math.abs(cashRegisterDifference(register)) > 0.009,
+    (register) => {
+      const summary = registerSummaries.find(({ register: row }) => row.id === register.id);
+      return register.status === "closed" && Math.abs(summary?.difference ?? 0) > 0.009;
+    },
   ).length;
-  const expectedFormulaDifference = expectedCash - expectedByFormula;
+  const savedFormulaDifference = sumMoney(
+    registerSummaries.map(({ savedExpectedDifference }) => savedExpectedDifference),
+  );
+  const digitalSales =
+    pixSales + creditSales + debitSales + cardSalesUnknown;
+  const closedExpectedCash = sumMoney(
+    registerSummaries
+      .filter(({ register }) => register.status === "closed")
+      .map(({ flow }) => flow.expectedCash),
+  );
+  const openExpectedCash = sumMoney(
+    registerSummaries
+      .filter(({ register }) => register.status === "open")
+      .map(({ flow }) => flow.expectedCash),
+  );
 
   const paymentRows = [
     { label: "Dinheiro", value: cashSales },
@@ -430,8 +484,8 @@ export default async function ReportsPage({
     <Panel>
       <SectionHeader
         eyebrow="Historico"
-        title="Historico por data"
-        description="Escolha um periodo e veja somente o que ficou salvo nele."
+        title="Historico financeiro"
+        description="Vendas, gavetas e fechamentos conciliados caixa por caixa."
         action={
           <LinkButton href="/caixa" variant="secondary">
             Caixa do dia
@@ -439,13 +493,15 @@ export default async function ReportsPage({
         }
       />
 
-      <Card>
+      <Card className="border-accent/20">
         <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
           <div>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="font-bold">Periodo</h2>
-                <p className="text-sm text-muted">Vendas, caixas e entradas/saidas dessas datas.</p>
+                <h2 className="font-bold">Periodo analisado</h2>
+                <p className="text-sm text-muted">
+                  O relatorio considera somente os movimentos ligados aos caixas deste periodo.
+                </p>
               </div>
               <div className="flex gap-2">
                 <LinkButton href={`/relatorios?start=${todayDate}&end=${todayDate}`} size="sm">
@@ -473,29 +529,77 @@ export default async function ReportsPage({
         </div>
       </Card>
 
-      <Card className="mt-4">
-        <SectionTitle number="1" title="Resultado do periodo" />
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-          <Metric label="Faturamento" value={revenue} />
-          <Metric label="Custo" value={cost} />
-          <Metric label="Lucro bruto" value={profit} tone={profit < 0 ? "bad" : "default"} />
-          <Metric label="Ticket medio" value={averageTicket} />
-          <Metric label="Cancelado" value={cancelledValue} tone={cancelledValue > 0 ? "bad" : "default"} />
-        </div>
-
-        <div className="mt-3 grid gap-3 md:grid-cols-5">
-          <Metric label="Vendas concluidas" value={completed.length} format="number" />
-          <Metric label="Cancelamentos" value={cancelled.length} format="number" tone={cancelled.length ? "bad" : "default"} />
-          <Metric label="Caixas abertos" value={openRegisters} format="number" />
-          <Metric label="Caixas fechados" value={closedRegisters} format="number" />
-          <Metric label="Caixas com diferenca" value={registersWithDifference} format="number" tone={registersWithDifference ? "bad" : "default"} />
-        </div>
-      </Card>
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <Card className="border-accent/25 bg-accent/5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm text-muted">Vendido no periodo</p>
+              <p className="mt-1 text-3xl font-black">{money(revenue)}</p>
+              <p className="mt-2 text-sm text-muted">
+                {completed.length} venda(s), ticket medio {money(averageTicket)}
+              </p>
+            </div>
+            <ReceiptText className="h-5 w-5 text-accent" />
+          </div>
+        </Card>
+        <Card className="border-green-500/25 bg-green-500/5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm text-muted">Entrou em dinheiro</p>
+              <p className="mt-1 text-3xl font-black text-green-300">
+                {money(cashFlow.cashSales + cashFlow.otherCashIn)}
+              </p>
+              <p className="mt-2 text-sm text-muted">
+                Vendas e outras entradas na gaveta
+              </p>
+            </div>
+            <Banknote className="h-5 w-5 text-green-300" />
+          </div>
+        </Card>
+        <Card className="border-blue-400/25 bg-blue-400/5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm text-muted">PIX e cartao</p>
+              <p className="mt-1 text-3xl font-black">{money(digitalSales)}</p>
+              <p className="mt-2 text-sm text-muted">
+                Faz parte das vendas, fora da gaveta
+              </p>
+            </div>
+            <CreditCard className="h-5 w-5 text-blue-300" />
+          </div>
+        </Card>
+        <Card
+          className={cn(
+            "border-line",
+            closedRegisters && Math.abs(cashDifference) > 0.009
+              ? "border-rose-500/30 bg-rose-500/5"
+              : "border-green-500/20",
+          )}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm text-muted">Diferenca nos fechamentos</p>
+              <p
+                className={cn(
+                  "mt-1 text-3xl font-black",
+                  Math.abs(cashDifference) > 0.009 && "text-rose-200",
+                )}
+              >
+                {money(cashDifference)}
+              </p>
+              <p className="mt-2 text-sm text-muted">
+                {closedRegisters} fechado(s), {openRegisters} aberto(s)
+              </p>
+            </div>
+            <Calculator className="h-5 w-5 text-muted" />
+          </div>
+        </Card>
+      </div>
 
       <Card className="mt-4 border-accent/20">
         <SectionTitle
-          number="2"
-          title="Movimento de dinheiro do periodo"
+          number="1"
+          title="Conta consolidada da gaveta"
           aside={
             closedRegisters ? (
               <Badge variant={Math.abs(cashDifference) > 0.009 ? "warning" : "success"}>
@@ -511,7 +615,7 @@ export default async function ReportsPage({
           <Metric label="Vendas em dinheiro" value={cashFlow.cashSales} tone="good" />
           <Metric label="Outras entradas" value={cashFlow.otherCashIn} tone="good" />
           <Metric label="Pagamentos e saidas" value={cashFlow.cashOut} tone="bad" />
-          <Metric label="Esperado nas gavetas" value={expectedCash} />
+          <Metric label="Esperado total" value={expectedCash} />
           <Metric
             label={closedRegisters ? "Diferenca fechada" : "Ainda nao contado"}
             value={closedRegisters ? cashDifference : 0}
@@ -529,21 +633,133 @@ export default async function ReportsPage({
           </span>
           <strong>= {money(cashFlow.expectedCash)} pela formula</strong>
         </div>
-        {closedRegisters ? (
-          <p className="mt-3 text-sm text-muted">
-            Dinheiro contado somente nos caixas fechados: {money(countedCash)}.
-          </p>
-        ) : null}
-        {Math.abs(expectedFormulaDifference) > 0.009 ? (
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <div className="rounded-lg border border-line bg-panel-strong p-3">
+            <p className="text-sm text-muted">Ainda em caixas abertos</p>
+            <p className="mt-1 font-black">{money(openExpectedCash)}</p>
+          </div>
+          <div className="rounded-lg border border-line bg-panel-strong p-3">
+            <p className="text-sm text-muted">Esperado nos caixas fechados</p>
+            <p className="mt-1 font-black">{money(closedExpectedCash)}</p>
+          </div>
+          <div className="rounded-lg border border-line bg-panel-strong p-3">
+            <p className="text-sm text-muted">Contado nos fechamentos</p>
+            <p className="mt-1 font-black">{money(countedCash)}</p>
+          </div>
+        </div>
+        {Math.abs(savedFormulaDifference) > 0.009 ? (
           <p className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100">
-            Conferir: o esperado salvo difere da formula em {money(expectedFormulaDifference)}.
+            Auditoria: o valor antigo salvo no banco difere das operacoes em{" "}
+            {money(savedFormulaDifference)}. Este relatorio usa a conta reconstruida acima.
           </p>
         ) : null}
       </Card>
 
+      <Card className="mt-4">
+        <SectionTitle
+          number="2"
+          title="Conferencia por caixa"
+          aside={<Badge>{registers.length} caixa(s)</Badge>}
+        />
+        {registerSummaries.length ? (
+          <div className="space-y-3">
+            {registerSummaries.map(({ register, flow, salesTotal, salesCount, counted, difference }) => (
+              <div
+                key={register.id}
+                className="rounded-xl border border-line bg-panel-strong p-4"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-lg border border-accent/25 bg-accent/10 p-2 text-accent">
+                      <WalletCards className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-black">{personName(register)}</p>
+                        <Badge variant={register.status === "closed" ? "neutral" : "success"}>
+                          {register.status === "closed" ? "Fechado" : "Aberto"}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-sm text-muted">
+                        Aberto em {dateTime(register.opened_at)}
+                        {register.closed_at ? ` - fechado em ${dateTime(register.closed_at)}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <p className="text-sm text-muted">Vendas deste caixa</p>
+                    <p className="font-black">{money(salesTotal)}</p>
+                    <p className="text-xs text-muted">{salesCount} venda(s)</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+                  <Metric label="Abertura" value={flow.opening} />
+                  <Metric label="Vendas dinheiro" value={flow.cashSales} tone="good" />
+                  <Metric label="Outras entradas" value={flow.otherCashIn} tone="good" />
+                  <Metric label="Saidas" value={flow.cashOut} tone="bad" />
+                  <Metric label="Esperado" value={flow.expectedCash} />
+                  <Metric
+                    label={counted === null ? "Aguardando fechamento" : "Diferenca"}
+                    value={counted === null ? 0 : difference}
+                    tone={counted !== null && Math.abs(difference) > 0.009 ? "bad" : "default"}
+                  />
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-background/40 p-3 text-sm">
+                  <span>
+                    {money(flow.opening)} + {money(flow.cashSales)} +{" "}
+                    {money(flow.otherCashIn)} - {money(flow.cashOut)} ={" "}
+                    <strong>{money(flow.expectedCash)}</strong>
+                  </span>
+                  <span className="text-muted">
+                    {counted === null
+                      ? "O valor contado aparecera quando o caixa for fechado."
+                      : `Contado no fechamento: ${money(counted)}`}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState>Nenhum caixa pertence ao periodo selecionado.</EmptyState>
+        )}
+      </Card>
+
+      <Card className="mt-4">
+        <SectionTitle number="3" title="Resultado comercial" />
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <Metric label="Faturamento" value={revenue} />
+          <Metric label="Custo estimado" value={cost} />
+          <Metric label="Lucro bruto" value={profit} tone={profit < 0 ? "bad" : "good"} />
+          <Metric label="Ticket medio" value={averageTicket} />
+          <Metric
+            label="Vendas canceladas"
+            value={cancelledValue}
+            tone={cancelledValue > 0 ? "bad" : "default"}
+          />
+        </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-5">
+          <Metric label="Vendas concluidas" value={completed.length} format="number" />
+          <Metric
+            label="Cancelamentos"
+            value={cancelled.length}
+            format="number"
+            tone={cancelled.length ? "bad" : "default"}
+          />
+          <Metric label="Caixas abertos" value={openRegisters} format="number" />
+          <Metric label="Caixas fechados" value={closedRegisters} format="number" />
+          <Metric
+            label="Caixas com diferenca"
+            value={registersWithDifference}
+            format="number"
+            tone={registersWithDifference ? "bad" : "default"}
+          />
+        </div>
+      </Card>
+
       <Card className="mt-4 border-green-400/20">
         <SectionTitle
-          number="3"
+          number="4"
           title="Maquininhas"
           aside={
             <Badge variant={Math.abs(machineDifference) > 0.009 ? "warning" : "success"}>
@@ -643,7 +859,7 @@ export default async function ReportsPage({
 
       <Card className="mt-4">
         <SectionTitle
-          number="4"
+          number="5"
           title="Detalhes salvos"
           aside={<Badge>{sales.length + registers.length + movements.length} registro(s)</Badge>}
         />
@@ -723,7 +939,7 @@ export default async function ReportsPage({
             <div className="mt-3">
               {registers.length ? (
                 <div className="space-y-2">
-                  {registers.map((register) => (
+                  {registerSummaries.map(({ register, flow, counted, difference }) => (
                     <div key={register.id} className="grid gap-2 rounded-lg border border-line bg-panel p-3 md:grid-cols-[1fr_auto]">
                       <div>
                         <p className="font-semibold">{personName(register)}</p>
@@ -732,9 +948,9 @@ export default async function ReportsPage({
                         </p>
                       </div>
                       <div className="text-sm md:text-right">
-                        <p>Esperado: {money(register.expected_amount)}</p>
-                        <p>Contado: {money(register.closing_amount)}</p>
-                        <p>Dif.: {money(cashRegisterDifference(register))}</p>
+                        <p>Esperado calculado: {money(flow.expectedCash)}</p>
+                        <p>Contado: {counted === null ? "Caixa aberto" : money(counted)}</p>
+                        <p>Dif.: {counted === null ? "-" : money(difference)}</p>
                       </div>
                     </div>
                   ))}

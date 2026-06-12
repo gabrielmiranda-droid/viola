@@ -7,7 +7,6 @@ import { StatCard } from "@/components/ui/stat-card";
 import { requireAdmin } from "@/lib/auth";
 import {
   cashFlowSummary,
-  cashRegisterDifference,
   movementsByType,
   salesByPayment,
   sumMoney,
@@ -34,6 +33,7 @@ export const maxDuration = 20;
 
 type SaleRow = {
   id: string;
+  cash_register_id: string;
   total_amount: number;
   gross_profit: number;
   payment_method: string;
@@ -62,12 +62,14 @@ type CashRegisterRow = {
 };
 
 type CashMovementRow = {
+  cash_register_id: string;
   movement_type: "entrada" | "saida";
   amount: number;
 };
 
 type CashMovementAuditRow = {
   metadata: {
+    cash_register_id?: string;
     movement_type?: string;
     amount?: number | string;
   } | null;
@@ -132,7 +134,7 @@ export default async function AdminDashboardPage() {
     fetchAllPages<SaleRow>((from, to) =>
       supabase
         .from("sales")
-        .select("id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users:users!sales_user_id_fkey(name,email)")
+        .select("id,cash_register_id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users:users!sales_user_id_fkey(name,email)")
         .eq("status", "completed")
         .gte("created_at", todayStart)
         .lte("created_at", today.end)
@@ -142,7 +144,7 @@ export default async function AdminDashboardPage() {
     fetchAllPages<SaleRow>((from, to) =>
       supabase
         .from("sales")
-        .select("id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users:users!sales_user_id_fkey(name,email)")
+        .select("id,cash_register_id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users:users!sales_user_id_fkey(name,email)")
         .eq("status", "completed")
         .gte("created_at", monthStart)
         .lt("created_at", month.end)
@@ -158,7 +160,7 @@ export default async function AdminDashboardPage() {
     fetchAllPages<SaleRow>((from, to) =>
       supabase
         .from("sales")
-        .select("id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users:users!sales_user_id_fkey(name,email)")
+        .select("id,cash_register_id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users:users!sales_user_id_fkey(name,email)")
         .eq("status", "cancelled")
         .gte("cancelled_at", todayStart)
         .lte("cancelled_at", today.end)
@@ -173,7 +175,7 @@ export default async function AdminDashboardPage() {
       .limit(80),
     supabase
       .from("cash_movements")
-      .select("movement_type,amount")
+      .select("cash_register_id,movement_type,amount")
       .gte("created_at", todayStart)
       .lte("created_at", today.end)
       .limit(400),
@@ -190,7 +192,7 @@ export default async function AdminDashboardPage() {
   if (cancellationsResult.error) unavailableSections.push("cancelamentos");
   if (activeRegistersResult.error) unavailableSections.push("gavetas abertas");
 
-  const todaySales = todaySalesResult.error ? [] : todaySalesResult.data;
+  const rawTodaySales = todaySalesResult.error ? [] : todaySalesResult.data;
   const monthSales = monthSalesResult.error ? [] : monthSalesResult.data;
   let productStockRows = (productStockResult.data ?? []) as unknown as ProductRow[];
 
@@ -218,7 +220,7 @@ export default async function AdminDashboardPage() {
     .filter(productTracksStock)
     .filter((product) => Number(product.quantity) <= Number(product.min_stock))
     .slice(0, 8);
-  const cancellations = cancellationsResult.error
+  const rawCancellations = cancellationsResult.error
     ? []
     : (cancellationsResult.data ?? []) as unknown as SaleRow[];
   let registers = (registersResult.data ?? []) as unknown as CashRegisterRow[];
@@ -257,11 +259,19 @@ export default async function AdminDashboardPage() {
     } else {
       movements = ((fallback.data ?? []) as unknown as CashMovementAuditRow[])
         .map((row) => ({
+          cash_register_id: row.metadata?.cash_register_id ?? "",
           movement_type: row.metadata?.movement_type === "saida" ? "saida" : "entrada",
           amount: Number(row.metadata?.amount ?? 0),
         }));
     }
   }
+  const registerIds = new Set(registers.map((register) => register.id));
+  const todaySales = rawTodaySales.filter((sale) => registerIds.has(sale.cash_register_id));
+  const cancellations = rawCancellations.filter((sale) =>
+    registerIds.has(sale.cash_register_id),
+  );
+  movements = movements.filter((movement) => registerIds.has(movement.cash_register_id));
+
   const todayRevenue = total(todaySales, "total_amount");
   const todayProfit = total(todaySales, "gross_profit");
   const monthRevenue = total(monthSales, "total_amount");
@@ -271,11 +281,6 @@ export default async function AdminDashboardPage() {
     ? registers.filter((register) => register.status === "open")
     : activeRegistersResult.data ?? [];
   const openCashNow = sumMoney(activeRegisters.map((register) => register.expected_amount));
-  const closedDifference = sumMoney(
-    registers
-      .filter((register) => register.status === "closed")
-      .map((register) => cashRegisterDifference(register)),
-  );
   const cashSales = salesByPayment(todaySales, "dinheiro");
   const pixSales = salesByPayment(todaySales, "pix");
   const cardSales = salesByPayment(todaySales, "cartao");
@@ -287,6 +292,26 @@ export default async function AdminDashboardPage() {
     cashIn,
     cashOut,
   });
+  const closedDifference = sumMoney(
+    registers
+      .filter((register) => register.status === "closed")
+      .map((register) => {
+        const registerSales = todaySales.filter(
+          (sale) => sale.cash_register_id === register.id,
+        );
+        const registerMovements = movements.filter(
+          (movement) => movement.cash_register_id === register.id,
+        );
+        const expected = cashFlowSummary({
+          opening: Number(register.opening_amount),
+          cashSales: salesByPayment(registerSales, "dinheiro"),
+          cashIn: movementsByType(registerMovements, "entrada"),
+          cashOut: movementsByType(registerMovements, "saida"),
+        }).expectedCash;
+
+        return Number(register.closing_amount ?? expected) - expected;
+      }),
+  );
   const openRegisters = activeRegisters.length;
   const closedRegisters = registers.filter((register) => register.status === "closed").length;
   const formulaDifference = savedExpectedCash - cashFlow.expectedCash;
