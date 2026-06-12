@@ -117,6 +117,8 @@ export default async function AdminDashboardPage() {
   const resetAt = resetLog?.created_at;
   const todayStart = resetAt && resetAt > today.start ? resetAt : today.start;
   const monthStart = resetAt && resetAt > month.start ? resetAt : month.start;
+  const resetAffectsToday = Boolean(resetAt && resetAt > today.start);
+  const resetAffectsMonth = Boolean(resetAt && resetAt > month.start);
 
   const [
     todaySalesResult,
@@ -125,6 +127,7 @@ export default async function AdminDashboardPage() {
     cancellationsResult,
     registersResult,
     movementsResult,
+    activeRegistersResult,
   ] = await Promise.all([
     fetchAllPages<SaleRow>((from, to) =>
       supabase
@@ -152,12 +155,16 @@ export default async function AdminDashboardPage() {
       .eq("active", true)
       .order("quantity", { ascending: true })
       .limit(120),
-    supabase
-      .from("sales")
-      .select("id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users(name,email)")
-      .eq("status", "cancelled")
-      .order("cancelled_at", { ascending: false })
-      .limit(6),
+    fetchAllPages<SaleRow>((from, to) =>
+      supabase
+        .from("sales")
+        .select("id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users(name,email)")
+        .eq("status", "cancelled")
+        .gte("cancelled_at", todayStart)
+        .lte("cancelled_at", today.end)
+        .order("cancelled_at", { ascending: false })
+        .range(from, to) as unknown as PromiseLike<{ data: SaleRow[] | null; error: { message: string; code?: string } | null }>,
+    ),
     supabase
       .from("cash_registers")
       .select("id,opening_amount,expected_amount,closing_amount,cash_difference,status")
@@ -170,11 +177,17 @@ export default async function AdminDashboardPage() {
       .gte("created_at", todayStart)
       .lte("created_at", today.end)
       .limit(400),
+    supabase
+      .from("cash_registers")
+      .select("id,expected_amount")
+      .eq("status", "open")
+      .limit(80),
   ]);
 
   if (todaySalesResult.error) throw todaySalesResult.error;
   if (monthSalesResult.error) throw monthSalesResult.error;
   if (cancellationsResult.error) throw cancellationsResult.error;
+  if (activeRegistersResult.error) throw activeRegistersResult.error;
 
   const todaySales = todaySalesResult.data;
   const monthSales = monthSalesResult.data;
@@ -239,7 +252,9 @@ export default async function AdminDashboardPage() {
   const todayProfit = total(todaySales, "gross_profit");
   const monthRevenue = total(monthSales, "total_amount");
   const averageTicket = todaySales.length ? todayRevenue / todaySales.length : 0;
-  const expectedCash = sumMoney(registers.map((register) => register.expected_amount));
+  const savedExpectedCash = sumMoney(registers.map((register) => register.expected_amount));
+  const activeRegisters = activeRegistersResult.data ?? [];
+  const openCashNow = sumMoney(activeRegisters.map((register) => register.expected_amount));
   const closedDifference = sumMoney(
     registers
       .filter((register) => register.status === "closed")
@@ -256,8 +271,9 @@ export default async function AdminDashboardPage() {
     cashIn,
     cashOut,
   });
-  const openRegisters = registers.filter((register) => register.status === "open").length;
+  const openRegisters = activeRegisters.length;
   const closedRegisters = registers.filter((register) => register.status === "closed").length;
+  const formulaDifference = savedExpectedCash - cashFlow.expectedCash;
   const saleIds = todaySales.map((sale) => sale.id);
   const itemsResult = saleIds.length
     ? await fetchAllPages<SaleItemRow>((from, to) =>
@@ -305,7 +321,11 @@ export default async function AdminDashboardPage() {
       <SectionHeader
         eyebrow="Hoje"
         title="Resumo de hoje"
-        description="O que vendeu, o que entrou, o que saiu e quanto deve ter na gaveta."
+        description={
+          resetAffectsToday && resetAt
+            ? `Nova simulacao contabilizada desde ${dateTime(resetAt)}.`
+            : "O que vendeu, o que entrou, o que saiu e quanto deve ter na gaveta."
+        }
         action={
           <div className="flex gap-2">
             <LinkButton href="/caixa" variant="secondary">Caixa do dia</LinkButton>
@@ -333,7 +353,11 @@ export default async function AdminDashboardPage() {
         <StatCard
           title="Lucro estimado"
           value={money(todayProfit)}
-          note={`Mes ${month.label}: ${money(monthRevenue)}`}
+          note={
+            resetAffectsMonth
+              ? `Desde o reinicio: ${money(monthRevenue)}`
+              : `Mes ${month.label}: ${money(monthRevenue)}`
+          }
           icon={<Banknote className="h-5 w-5" />}
           tone="success"
         />
@@ -350,9 +374,13 @@ export default async function AdminDashboardPage() {
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <h2 className="font-black">Dinheiro de hoje</h2>
-            <p className="text-sm text-muted">Somando todos os caixas abertos hoje.</p>
+            <p className="text-sm text-muted">
+              Movimento acumulado dos caixas iniciados nesta operacao.
+            </p>
           </div>
-          <Badge>Esperado nas gavetas {money(expectedCash)}</Badge>
+          <Badge variant={openRegisters ? "info" : "neutral"}>
+            Gavetas abertas agora {money(openCashNow)}
+          </Badge>
         </div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           <div className="rounded-lg border border-line bg-panel-strong p-3">
@@ -376,9 +404,9 @@ export default async function AdminDashboardPage() {
             <p className="mt-1 text-xs text-muted">Motoboy, compras e retiradas</p>
           </div>
           <div className="rounded-lg border border-accent/20 bg-accent/5 p-3">
-            <p className="text-sm text-muted">Saldo esperado</p>
-            <p className="font-bold text-white">{money(expectedCash)}</p>
-            <p className="mt-1 text-xs text-muted">Dinheiro fisico agora</p>
+            <p className="text-sm text-muted">Esperado nos caixas do dia</p>
+            <p className="font-bold text-white">{money(cashFlow.expectedCash)}</p>
+            <p className="mt-1 text-xs text-muted">Abertos e ja fechados</p>
           </div>
         </div>
         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 rounded-lg border border-line bg-background/40 p-3 text-sm">
@@ -386,12 +414,17 @@ export default async function AdminDashboardPage() {
           <span className="text-green-300">+ {money(cashFlow.cashSales)} vendas</span>
           <span className="text-green-300">+ {money(cashFlow.otherCashIn)} outras entradas</span>
           <span className="text-rose-200">- {money(cashFlow.cashOut)} pagamentos/saidas</span>
-          <strong>= {money(expectedCash)} esperado</strong>
+          <strong>= {money(cashFlow.expectedCash)} esperado</strong>
         </div>
         <p className="mt-3 text-sm text-muted">
           PIX {money(pixSales)} e cartao {money(cardSales)} fazem parte das vendas, mas nao da
           gaveta. Diferenca nos caixas fechados: {money(closedDifference)}.
         </p>
+        {Math.abs(formulaDifference) > 0.009 ? (
+          <p className="mt-3 rounded-lg border border-amber-400/25 bg-amber-400/10 p-3 text-sm text-amber-100">
+            Atencao: o saldo salvo nos caixas difere da formula em {money(formulaDifference)}.
+          </p>
+        ) : null}
       </Card>
 
       <ResetHistoryForm />
