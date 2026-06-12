@@ -203,7 +203,7 @@ export default async function ReportsPage({
     fetchAllPages<SaleRow>((from, to) =>
       supabase
         .from("sales")
-        .select("id,cash_register_id,total_amount,total_cost,gross_profit,payment_method,status,card_type,card_machine,preparation_status,created_at,users(name,email)")
+        .select("id,cash_register_id,total_amount,total_cost,gross_profit,payment_method,status,card_type,card_machine,preparation_status,created_at,users:users!sales_user_id_fkey(name,email)")
         .gte("created_at", rangeStart)
         .lte("created_at", range.end)
         .order("created_at", { ascending: false })
@@ -243,7 +243,7 @@ export default async function ReportsPage({
     const fallback = await fetchAllPages<SaleRow>((from, to) =>
       supabase
         .from("sales")
-        .select("id,cash_register_id,total_amount,total_cost,gross_profit,payment_method,status,created_at,users(name,email)")
+        .select("id,cash_register_id,total_amount,total_cost,gross_profit,payment_method,status,created_at,users:users!sales_user_id_fkey(name,email)")
         .gte("created_at", rangeStart)
         .lte("created_at", range.end)
         .order("created_at", { ascending: false })

@@ -132,7 +132,7 @@ export default async function AdminDashboardPage() {
     fetchAllPages<SaleRow>((from, to) =>
       supabase
         .from("sales")
-        .select("id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users(name,email)")
+        .select("id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users:users!sales_user_id_fkey(name,email)")
         .eq("status", "completed")
         .gte("created_at", todayStart)
         .lte("created_at", today.end)
@@ -142,7 +142,7 @@ export default async function AdminDashboardPage() {
     fetchAllPages<SaleRow>((from, to) =>
       supabase
         .from("sales")
-        .select("id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users(name,email)")
+        .select("id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users:users!sales_user_id_fkey(name,email)")
         .eq("status", "completed")
         .gte("created_at", monthStart)
         .lt("created_at", month.end)
@@ -158,7 +158,7 @@ export default async function AdminDashboardPage() {
     fetchAllPages<SaleRow>((from, to) =>
       supabase
         .from("sales")
-        .select("id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users(name,email)")
+        .select("id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users:users!sales_user_id_fkey(name,email)")
         .eq("status", "cancelled")
         .gte("cancelled_at", todayStart)
         .lte("cancelled_at", today.end)
