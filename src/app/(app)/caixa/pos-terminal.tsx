@@ -326,10 +326,11 @@ function CashRegisterSummary({
   const cashIn = movementsByType(cashMovements, "entrada");
   const cashOut = movementsByType(cashMovements, "saida");
   const opening = Number(register.opening_amount);
-  const drawerNow = Number(register.expected_amount);
   const soldTotal = totalSales(registerSales);
   const formulaTotal = expectedCashTotal({ opening, cashSales, cashIn, cashOut });
-  const formulaDifference = drawerNow - formulaTotal;
+  const savedDrawer = Number(register.expected_amount);
+  const drawerNow = formulaTotal;
+  const formulaDifference = savedDrawer - formulaTotal;
 
   return (
     <Card className="overflow-hidden border-accent/25 bg-panel p-0">
@@ -428,7 +429,9 @@ function CashRegisterSummary({
             <span className="text-rose-200">- {money(cashOut)} pagamentos/saidas</span>
             <strong>= {money(drawerNow)}</strong>
             {Math.abs(formulaDifference) > 0.009 ? (
-              <span className="text-amber-200">Conferir {money(formulaDifference)}</span>
+              <span className="text-amber-200">
+                Banco desatualizado em {money(formulaDifference)}
+              </span>
             ) : null}
           </div>
         </div>
@@ -556,25 +559,20 @@ function CashPanel({
   const unknownCardSales = cardSalesWithoutType(registerSales);
   const cashIn = movementsByType(cashMovements, "entrada");
   const cashOut = movementsByType(cashMovements, "saida");
-  const expectedCash = Number(register.expected_amount);
+  const savedExpectedCash = Number(register.expected_amount);
   const cashFlow = cashFlowSummary({
     opening: Number(register.opening_amount),
     cashSales,
     cashIn,
     cashOut,
   });
+  const expectedCash = cashFlow.expectedCash;
+  const cashFormulaDifference = savedExpectedCash - expectedCash;
   const movementValue = asNumber(movementAmount);
   const projectedCash =
     expectedCash + (movementType === "entrada" ? movementValue : -movementValue);
   const movementIsInvalid =
     movementValue <= 0 || (movementType === "saida" && projectedCash < 0);
-  const expectedByFormula = expectedCashTotal({
-    opening: Number(register.opening_amount),
-    cashSales,
-    cashIn,
-    cashOut,
-  });
-  const cashFormulaDifference = expectedCash - expectedByFormula;
   const terminalTotals = terminalRows.reduce(
     (acc, row) => ({
       credit: acc.credit + asNumber(row.creditAmount),

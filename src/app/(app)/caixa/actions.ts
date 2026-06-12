@@ -79,6 +79,64 @@ function isMissingSaleDetailSupport(error: { message?: string; code?: string } |
   );
 }
 
+async function reconcileRegisterExpectedAmount(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  cashRegisterId: string,
+) {
+  const [registerResult, salesResult, movementsResult] = await Promise.all([
+    supabase
+      .from("cash_registers")
+      .select("id,opening_amount,expected_amount,status")
+      .eq("id", cashRegisterId)
+      .single<{
+        id: string;
+        opening_amount: number;
+        expected_amount: number;
+        status: string;
+      }>(),
+    supabase
+      .from("sales")
+      .select("total_amount")
+      .eq("cash_register_id", cashRegisterId)
+      .eq("status", "completed")
+      .eq("payment_method", "dinheiro"),
+    supabase
+      .from("cash_movements")
+      .select("movement_type,amount")
+      .eq("cash_register_id", cashRegisterId),
+  ]);
+
+  if (registerResult.error || !registerResult.data || salesResult.error || movementsResult.error) {
+    return;
+  }
+
+  const cashSales = (salesResult.data ?? []).reduce(
+    (total, sale) => total + Number(sale.total_amount ?? 0),
+    0,
+  );
+  const movements = movementsResult.data ?? [];
+  const cashIn = movements
+    .filter((movement) => movement.movement_type === "entrada")
+    .reduce((total, movement) => total + Number(movement.amount ?? 0), 0);
+  const cashOut = movements
+    .filter((movement) => movement.movement_type === "saida")
+    .reduce((total, movement) => total + Number(movement.amount ?? 0), 0);
+  const expected = Math.round(
+    (Number(registerResult.data.opening_amount) + cashSales + cashIn - cashOut) * 100,
+  ) / 100;
+
+  if (
+    registerResult.data.status === "open"
+    && Math.abs(Number(registerResult.data.expected_amount) - expected) > 0.009
+  ) {
+    await supabase
+      .from("cash_registers")
+      .update({ expected_amount: expected })
+      .eq("id", cashRegisterId)
+      .eq("status", "open");
+  }
+}
+
 function terminalRowsFromFormData(formData: FormData): TerminalClosing[] {
   const names = formData.getAll("terminal_name");
   const credits = formData.getAll("terminal_credit");
@@ -152,6 +210,7 @@ export async function closeRegisterAction(
     };
   }
 
+  await reconcileRegisterExpectedAmount(supabase, parsed.data.cashRegisterId);
   const terminalRows = terminalRowsFromFormData(formData);
   const detailedResult = await supabase.rpc("close_cash_register_detailed", {
     p_cash_register_id: parsed.data.cashRegisterId,
@@ -225,6 +284,7 @@ export async function cashMovementAction(
   }
 
   const supabase = await createClient();
+  await reconcileRegisterExpectedAmount(supabase, parsed.data.cashRegisterId);
   const movementLabel = parsed.data.movementType === "entrada" ? "Entrada" : "Saida";
   const { error } = await supabase.rpc("register_cash_movement", {
     p_cash_register_id: parsed.data.cashRegisterId,
@@ -397,6 +457,8 @@ export async function finalizeSaleAction(input: {
           });
         }
 
+        await reconcileRegisterExpectedAmount(supabase, parsed.data.cashRegisterId);
+
         revalidatePath("/caixa");
         revalidatePath("/admin");
         revalidatePath("/estoque");
@@ -422,6 +484,8 @@ export async function finalizeSaleAction(input: {
       message: result.error.message,
     };
   }
+
+  await reconcileRegisterExpectedAmount(supabase, parsed.data.cashRegisterId);
 
   revalidatePath("/caixa");
   revalidatePath("/admin");
