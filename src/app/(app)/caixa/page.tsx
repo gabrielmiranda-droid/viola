@@ -1,7 +1,13 @@
 import { Panel } from "@/components/ui/card";
 import { SectionHeader } from "@/components/ui/section-header";
 import { requireRole } from "@/lib/auth";
-import { mergeSalePaymentDetails, type SalePaymentAudit } from "@/lib/cash";
+import {
+  cashFlowSummary,
+  mergeSalePaymentDetails,
+  movementsByType,
+  salesByPayment,
+  type SalePaymentAudit,
+} from "@/lib/cash";
 import { todayRange } from "@/lib/dates";
 import { defaultTrackStockForCategory, productTracksStock } from "@/lib/product-stock";
 import { createClient } from "@/lib/supabase/server";
@@ -217,6 +223,23 @@ export default async function CashierPage() {
 
       cashMovements = ((fallbackMovementsResult.data ?? []) as unknown as CashMovementAuditRow[])
         .map((row) => cashMovementFromAudit(row, register.id));
+    }
+
+    const expectedCash = cashFlowSummary({
+      opening: Number(register.opening_amount),
+      cashSales: salesByPayment(registerSales, "dinheiro"),
+      cashIn: movementsByType(cashMovements, "entrada"),
+      cashOut: movementsByType(cashMovements, "saida"),
+    }).expectedCash;
+
+    if (Math.abs(Number(register.expected_amount) - expectedCash) > 0.009) {
+      await supabase
+        .from("cash_registers")
+        .update({ expected_amount: expectedCash })
+        .eq("id", register.id)
+        .eq("status", "open");
+
+      register.expected_amount = expectedCash;
     }
   }
 

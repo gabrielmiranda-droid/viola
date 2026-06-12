@@ -328,9 +328,7 @@ function CashRegisterSummary({
   const opening = Number(register.opening_amount);
   const soldTotal = totalSales(registerSales);
   const formulaTotal = expectedCashTotal({ opening, cashSales, cashIn, cashOut });
-  const savedDrawer = Number(register.expected_amount);
   const drawerNow = formulaTotal;
-  const formulaDifference = savedDrawer - formulaTotal;
 
   return (
     <Card className="overflow-hidden border-accent/25 bg-panel p-0">
@@ -428,11 +426,6 @@ function CashRegisterSummary({
             <span className="text-green-300">+ {money(cashIn)} outras entradas</span>
             <span className="text-rose-200">- {money(cashOut)} pagamentos/saidas</span>
             <strong>= {money(drawerNow)}</strong>
-            {Math.abs(formulaDifference) > 0.009 ? (
-              <span className="text-amber-200">
-                Banco desatualizado em {money(formulaDifference)}
-              </span>
-            ) : null}
           </div>
         </div>
 
@@ -559,7 +552,6 @@ function CashPanel({
   const unknownCardSales = cardSalesWithoutType(registerSales);
   const cashIn = movementsByType(cashMovements, "entrada");
   const cashOut = movementsByType(cashMovements, "saida");
-  const savedExpectedCash = Number(register.expected_amount);
   const cashFlow = cashFlowSummary({
     opening: Number(register.opening_amount),
     cashSales,
@@ -567,7 +559,6 @@ function CashPanel({
     cashOut,
   });
   const expectedCash = cashFlow.expectedCash;
-  const cashFormulaDifference = savedExpectedCash - expectedCash;
   const movementValue = asNumber(movementAmount);
   const projectedCash =
     expectedCash + (movementType === "entrada" ? movementValue : -movementValue);
@@ -1023,12 +1014,6 @@ function CashPanel({
                 </div>
               </div>
             </div>
-
-            {Math.abs(cashFormulaDifference) > 0.009 ? (
-              <p className="mb-4 rounded-lg border border-amber-400/25 bg-amber-400/10 p-3 text-sm text-amber-100">
-                O valor salvo difere da formula em {money(cashFormulaDifference)}.
-              </p>
-            ) : null}
 
             <div className="mb-3">
               <p className="text-xs font-black uppercase tracking-[0.1em] text-accent">
