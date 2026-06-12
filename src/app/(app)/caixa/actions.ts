@@ -12,7 +12,7 @@ const saleSchema = z.object({
   cashRegisterId: z.string().uuid(),
   paymentMethod: z.enum(paymentMethods),
   cardType: z.enum(["credito", "debito"]).nullable().optional(),
-  cardMachine: z.string().trim().max(80).optional(),
+  cardMachine: z.string().trim().max(80).nullable().optional(),
   items: z
     .array(
       z.object({
