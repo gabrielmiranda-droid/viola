@@ -184,11 +184,14 @@ export default async function AdminDashboardPage() {
       .limit(80),
   ]);
 
-  if (todaySalesResult.error) throw todaySalesResult.error;
-  if (monthSalesResult.error) throw monthSalesResult.error;
+  const unavailableSections: string[] = [];
+  if (todaySalesResult.error) unavailableSections.push("vendas de hoje");
+  if (monthSalesResult.error) unavailableSections.push("vendas do mes");
+  if (cancellationsResult.error) unavailableSections.push("cancelamentos");
+  if (activeRegistersResult.error) unavailableSections.push("gavetas abertas");
 
-  const todaySales = todaySalesResult.data;
-  const monthSales = monthSalesResult.data;
+  const todaySales = todaySalesResult.error ? [] : todaySalesResult.data;
+  const monthSales = monthSalesResult.error ? [] : monthSalesResult.data;
   let productStockRows = (productStockResult.data ?? []) as unknown as ProductRow[];
 
   if (isMissingTrackStockColumn(productStockResult.error)) {
@@ -202,9 +205,13 @@ export default async function AdminDashboardPage() {
       ...product,
       track_stock: defaultTrackStockForCategory(product.category),
     }));
-    if (fallback.error) throw fallback.error;
+    if (fallback.error) {
+      productStockRows = [];
+      unavailableSections.push("estoque");
+    }
   } else if (productStockResult.error) {
-    throw productStockResult.error;
+    productStockRows = [];
+    unavailableSections.push("estoque");
   }
 
   const lowStock = productStockRows
@@ -224,9 +231,13 @@ export default async function AdminDashboardPage() {
         .lte("opened_at", today.end)
         .limit(80);
 
-    registers = ((fallback.data ?? []) as unknown as Omit<CashRegisterRow, "cash_difference">[])
-      .map((register) => ({ ...register, cash_difference: null }));
-    if (fallback.error) throw fallback.error;
+    if (fallback.error) {
+      registers = [];
+      unavailableSections.push("caixas do dia");
+    } else {
+      registers = ((fallback.data ?? []) as unknown as Omit<CashRegisterRow, "cash_difference">[])
+        .map((register) => ({ ...register, cash_difference: null }));
+    }
   }
 
   let movements = (movementsResult.data ?? []) as unknown as CashMovementRow[];
@@ -240,13 +251,16 @@ export default async function AdminDashboardPage() {
       .lte("created_at", today.end)
       .limit(400);
 
-    movements = ((fallback.data ?? []) as unknown as CashMovementAuditRow[])
-      .map((row) => ({
-        movement_type: row.metadata?.movement_type === "saida" ? "saida" : "entrada",
-        amount: Number(row.metadata?.amount ?? 0),
-      }));
-
-    if (fallback.error) throw fallback.error;
+    if (fallback.error) {
+      movements = [];
+      unavailableSections.push("entradas e saidas");
+    } else {
+      movements = ((fallback.data ?? []) as unknown as CashMovementAuditRow[])
+        .map((row) => ({
+          movement_type: row.metadata?.movement_type === "saida" ? "saida" : "entrada",
+          amount: Number(row.metadata?.amount ?? 0),
+        }));
+    }
   }
   const todayRevenue = total(todaySales, "total_amount");
   const todayProfit = total(todaySales, "gross_profit");
@@ -286,8 +300,12 @@ export default async function AdminDashboardPage() {
           .range(from, to) as unknown as PromiseLike<{ data: SaleItemRow[] | null; error: { message: string; code?: string } | null }>,
       )
     : { data: [] };
-  if ("error" in itemsResult && itemsResult.error) throw itemsResult.error;
-  const items = (itemsResult.data ?? []) as unknown as SaleItemRow[];
+  if ("error" in itemsResult && itemsResult.error) {
+    unavailableSections.push("produtos vendidos");
+  }
+  const items = ("error" in itemsResult && itemsResult.error)
+    ? []
+    : (itemsResult.data ?? []) as unknown as SaleItemRow[];
 
   const employees = Object.values(
     todaySales.reduce<Record<string, { name: string; total: number; count: number }>>(
@@ -337,6 +355,16 @@ export default async function AdminDashboardPage() {
           </div>
         }
       />
+
+      {unavailableSections.length ? (
+        <Card className="mb-4 border-amber-400/25 bg-amber-400/10">
+          <p className="font-bold text-amber-100">Resumo carregado parcialmente</p>
+          <p className="mt-1 text-sm text-amber-100/80">
+            Nao foi possivel atualizar: {unavailableSections.join(", ")}. Os demais valores
+            continuam disponiveis.
+          </p>
+        </Card>
+      ) : null}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
