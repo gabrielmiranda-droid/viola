@@ -696,16 +696,31 @@ export async function applyPreparedProductsModeAction(
   void _state;
   const profile = await requireAdmin();
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const result = await supabase
     .from("products")
     .select("id,name,category,quantity,cost_price,sale_price,min_stock,track_stock,active,updated_at")
     .eq("active", true);
 
-  if (error) {
-    return { ok: false, message: error.message };
-  }
+  let activeProducts = (result.data ?? []) as unknown as Product[];
 
-  const activeProducts = (data ?? []) as unknown as Product[];
+  if (isMissingTrackStockColumn(result.error)) {
+    const fallback = await supabase
+      .from("products")
+      .select("id,name,category,quantity,cost_price,sale_price,min_stock,active,updated_at")
+      .eq("active", true);
+
+    if (fallback.error) {
+      return { ok: false, message: fallback.error.message };
+    }
+
+    activeProducts = ((fallback.data ?? []) as unknown as Product[]).map((product) => ({
+      ...product,
+      max_stock: 0,
+      track_stock: null,
+    }));
+  } else if (result.error) {
+    return { ok: false, message: result.error.message };
+  }
 
   if (!activeProducts.length) {
     return { ok: true, message: "Nenhum produto ativo encontrado." };
