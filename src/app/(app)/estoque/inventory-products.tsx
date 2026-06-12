@@ -435,7 +435,7 @@ export function InventoryProducts({
             <ClearCatalogButton activeCount={activeCount} />
             <ProductImportDialog products={products} />
             {!hasInventoryColumns ? (
-              <Badge variant="warning">Aplicar migracao de estoque</Badge>
+              <Badge variant="info">Banco em modo compativel</Badge>
             ) : null}
             <Badge>{filteredProducts.length} produto(s)</Badge>
           </div>

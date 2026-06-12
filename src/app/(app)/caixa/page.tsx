@@ -1,6 +1,7 @@
 import { Panel } from "@/components/ui/card";
 import { SectionHeader } from "@/components/ui/section-header";
 import { requireRole } from "@/lib/auth";
+import { mergeSalePaymentDetails, type SalePaymentAudit } from "@/lib/cash";
 import { todayRange } from "@/lib/dates";
 import { defaultTrackStockForCategory, productTracksStock } from "@/lib/product-stock";
 import { createClient } from "@/lib/supabase/server";
@@ -18,6 +19,7 @@ type CashMovementAuditRow = {
   user_id: string | null;
   entity_id: string | null;
   metadata: {
+    cash_register_id?: string;
     movement_type?: string;
     amount?: number | string;
     reason?: string;
@@ -111,17 +113,32 @@ async function loadRegisterSales(
     .eq("cash_register_id", cashRegisterId)
     .order("created_at", { ascending: false });
 
+  let sales: RegisterSale[];
+
   if (!isMissingOperationalColumn(result.error)) {
-    return ((result.data ?? []) as unknown as RegisterSale[]).map(normalizeSale);
+    sales = ((result.data ?? []) as unknown as RegisterSale[]).map(normalizeSale);
+  } else {
+    const fallback = await supabase
+      .from("sales")
+      .select("id,total_amount,payment_method,status,created_at")
+      .eq("cash_register_id", cashRegisterId)
+      .order("created_at", { ascending: false });
+
+    sales = ((fallback.data ?? []) as unknown as RegisterSale[]).map(normalizeSale);
   }
 
-  const fallback = await supabase
-    .from("sales")
-    .select("id,total_amount,payment_method,status,created_at")
-    .eq("cash_register_id", cashRegisterId)
-    .order("created_at", { ascending: false });
+  if (!sales.length) return sales;
 
-  return ((fallback.data ?? []) as unknown as RegisterSale[]).map(normalizeSale);
+  const { data: paymentAudits } = await supabase
+    .from("audit_logs")
+    .select("entity_id,metadata")
+    .eq("action", "sale.payment_details")
+    .in("entity_id", sales.map((sale) => sale.id));
+
+  return mergeSalePaymentDetails(
+    sales,
+    (paymentAudits ?? []) as unknown as SalePaymentAudit[],
+  );
 }
 
 async function loadRegisterSaleItems(
@@ -141,7 +158,7 @@ async function loadRegisterSaleItems(
 function cashMovementFromAudit(row: CashMovementAuditRow, cashRegisterId: string): CashMovement {
   return {
     id: row.id,
-    cash_register_id: row.entity_id ?? cashRegisterId,
+    cash_register_id: row.metadata?.cash_register_id ?? cashRegisterId,
     user_id: row.user_id ?? "",
     movement_type: row.metadata?.movement_type === "saida" ? "saida" : "entrada",
     amount: Number(row.metadata?.amount ?? 0),
@@ -193,8 +210,8 @@ export default async function CashierPage() {
       const fallbackMovementsResult = await supabase
         .from("audit_logs")
         .select("id,user_id,entity_id,metadata,created_at")
-        .eq("action", "cash_register.cash_movement")
-        .eq("entity_id", register.id)
+        .like("action", "cash_movement.%")
+        .eq("metadata->>cash_register_id", register.id)
         .order("created_at", { ascending: false })
         .limit(20);
 

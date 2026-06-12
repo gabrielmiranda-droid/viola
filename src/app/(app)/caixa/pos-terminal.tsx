@@ -39,9 +39,11 @@ import {
   cardSalesByType,
   cardSalesWithoutType,
   expectedCashTotal,
+  mergeSalePaymentDetails,
   movementsByType,
   salesByPayment,
   totalSales,
+  type SalePaymentAudit,
 } from "@/lib/cash";
 import { cn } from "@/lib/cn";
 import { dateTime, money, quantity } from "@/lib/format";
@@ -82,6 +84,18 @@ type TerminalDraft = {
   creditAmount: string;
   debitAmount: string;
   pixAmount: string;
+};
+
+type CashMovementAuditRow = {
+  id: string;
+  user_id: string | null;
+  metadata: {
+    cash_register_id?: string;
+    movement_type?: string;
+    amount?: number | string;
+    reason?: string;
+  } | null;
+  created_at: string;
 };
 
 type CashTab = "vendas" | "movimentacao" | "fechamento";
@@ -978,7 +992,7 @@ export function PosTerminal({
       sales = ((fallback.data ?? []) as unknown as RegisterSale[]).map(normalizeSale);
     }
 
-    const [itemsResult, movementsResult] = await Promise.all([
+    const [itemsResult, movementsResult, paymentAuditResult] = await Promise.all([
       sales.length
         ? supabase
             .from("sale_items")
@@ -990,11 +1004,43 @@ export function PosTerminal({
         .select("id,cash_register_id,user_id,movement_type,amount,reason,created_at")
         .eq("cash_register_id", cashRegisterId)
         .order("created_at", { ascending: false }),
+      sales.length
+        ? supabase
+            .from("audit_logs")
+            .select("entity_id,metadata")
+            .eq("action", "sale.payment_details")
+            .in("entity_id", sales.map((sale) => sale.id))
+        : Promise.resolve({ data: [] }),
     ]);
 
-    setLiveSales(sales);
+    let movements = (movementsResult.data ?? []) as unknown as CashMovement[];
+
+    if (movementsResult.error) {
+      const auditResult = await supabase
+        .from("audit_logs")
+        .select("id,user_id,metadata,created_at")
+        .like("action", "cash_movement.%")
+        .eq("metadata->>cash_register_id", cashRegisterId)
+        .order("created_at", { ascending: false });
+
+      movements = ((auditResult.data ?? []) as unknown as CashMovementAuditRow[])
+        .map((row) => ({
+          id: row.id,
+          cash_register_id: row.metadata?.cash_register_id ?? cashRegisterId,
+          user_id: row.user_id ?? "",
+          movement_type: row.metadata?.movement_type === "saida" ? "saida" : "entrada",
+          amount: Number(row.metadata?.amount ?? 0),
+          reason: row.metadata?.reason ?? "Movimentacao de caixa",
+          created_at: row.created_at,
+        }));
+    }
+
+    setLiveSales(mergeSalePaymentDetails(
+      sales,
+      (paymentAuditResult.data ?? []) as unknown as SalePaymentAudit[],
+    ));
     setLiveSaleItems((itemsResult.data ?? []) as unknown as RegisterSaleItem[]);
-    setLiveMovements((movementsResult.data ?? []) as unknown as CashMovement[]);
+    setLiveMovements(movements);
   }, [supabase]);
 
   const liveRegisterId = liveRegister?.id;

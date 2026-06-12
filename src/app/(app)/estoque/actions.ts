@@ -261,7 +261,7 @@ export async function createProductAction(
     ok: true,
     message: maxStockSaved && trackStockSaved
       ? "Produto cadastrado."
-      : "Produto cadastrado. Aplique a migracao para gravar o modo de estoque no banco.",
+      : "Produto cadastrado em modo compativel com o banco atual.",
   };
 }
 

@@ -12,9 +12,11 @@ import {
   cashRegisterDifference,
   expectedCashTotal,
   groupSalesByMachine,
+  mergeSalePaymentDetails,
   movementsByType,
   salesByPayment,
   sumMoney,
+  type SalePaymentAudit,
 } from "@/lib/cash";
 import { cn } from "@/lib/cn";
 import { monthRange, rangeFromSearch, todayRange } from "@/lib/dates";
@@ -76,6 +78,7 @@ type CashMovementAuditRow = {
   id: string;
   entity_id: string | null;
   metadata: {
+    cash_register_id?: string;
     movement_type?: string;
     amount?: number | string;
     reason?: string;
@@ -113,7 +116,7 @@ function personName(row: { users?: { name: string | null; email: string | null }
 function movementFromAudit(row: CashMovementAuditRow): CashMovementRow {
   return {
     id: row.id,
-    cash_register_id: row.entity_id ?? "",
+    cash_register_id: row.metadata?.cash_register_id ?? "",
     movement_type: row.metadata?.movement_type === "saida" ? "saida" : "entrada",
     amount: Number(row.metadata?.amount ?? 0),
     reason: row.metadata?.reason ?? "Movimento de caixa",
@@ -241,6 +244,20 @@ export default async function ReportsPage({
   } else if (salesResult.error) {
     throw salesResult.error;
   }
+
+  if (sales.length) {
+    const { data: paymentAudits } = await supabase
+      .from("audit_logs")
+      .select("entity_id,metadata")
+      .eq("action", "sale.payment_details")
+      .in("entity_id", sales.map((sale) => sale.id));
+
+    sales = mergeSalePaymentDetails(
+      sales,
+      (paymentAudits ?? []) as unknown as SalePaymentAudit[],
+    );
+  }
+
   const completed = sales.filter((sale) => sale.status === "completed");
   const cancelled = sales.filter((sale) => sale.status === "cancelled");
   const completedIds = completed.map((sale) => sale.id);
@@ -279,7 +296,8 @@ export default async function ReportsPage({
       supabase
         .from("audit_logs")
         .select("id,entity_id,metadata,created_at,users(name,email)")
-        .eq("action", "cash_register.cash_movement")
+        .like("action", "cash_movement.%")
+        .not("metadata->>cash_register_id", "is", null)
         .gte("created_at", range.start)
         .lte("created_at", range.end)
         .order("created_at", { ascending: false })

@@ -1,10 +1,41 @@
 type SaleLike = {
+  id?: string;
   total_amount: number;
   payment_method: string;
   status?: string;
   card_type?: string | null;
   card_machine?: string | null;
 };
+
+export type SalePaymentAudit = {
+  entity_id: string | null;
+  metadata: {
+    card_type?: string | null;
+    card_machine?: string | null;
+  } | null;
+};
+
+export function mergeSalePaymentDetails<T extends SaleLike>(
+  sales: T[],
+  audits: SalePaymentAudit[],
+) {
+  const detailsBySale = new Map(
+    audits
+      .filter((audit) => audit.entity_id)
+      .map((audit) => [audit.entity_id, audit.metadata]),
+  );
+
+  return sales.map((sale) => {
+    const details = sale.id ? detailsBySale.get(sale.id) : null;
+    if (!details) return sale;
+
+    return {
+      ...sale,
+      card_type: sale.card_type ?? details.card_type ?? null,
+      card_machine: sale.card_machine ?? details.card_machine ?? null,
+    };
+  });
+}
 
 type CashMovementLike = {
   movement_type: "entrada" | "saida" | string;

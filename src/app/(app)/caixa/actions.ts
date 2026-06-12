@@ -164,11 +164,38 @@ export async function closeRegisterAction(
   });
 
   if (detailedResult.error) {
+    if (isMissingRpc(detailedResult.error, "close_cash_register_detailed")) {
+      const legacyNotes = [
+        parsed.data.notes,
+        `Conferencia: dinheiro ${parsed.data.cashAmount.toFixed(2)}; credito ${parsed.data.creditAmount.toFixed(2)}; debito ${parsed.data.debitAmount.toFixed(2)}; PIX ${parsed.data.pixAmount.toFixed(2)}.`,
+        terminalRows.length
+          ? `Maquininhas: ${terminalRows.map((row) =>
+              `${row.terminal_name} (credito ${row.credit_amount.toFixed(2)}, debito ${row.debit_amount.toFixed(2)}, PIX ${row.pix_amount.toFixed(2)})`
+            ).join("; ")}.`
+          : "",
+      ].filter(Boolean).join("\n");
+      const legacyResult = await supabase.rpc("close_cash_register", {
+        p_cash_register_id: parsed.data.cashRegisterId,
+        p_closing_amount: parsed.data.cashAmount,
+        p_notes: legacyNotes || null,
+      });
+
+      if (!legacyResult.error) {
+        revalidatePath("/caixa");
+        revalidatePath("/admin");
+        revalidatePath("/relatorios");
+        return {
+          ok: true,
+          message: "Caixa fechado. A conferencia detalhada foi salva nas observacoes.",
+        };
+      }
+
+      return { ok: false, message: legacyResult.error.message };
+    }
+
     return {
       ok: false,
-      message: isMissingRpc(detailedResult.error, "close_cash_register_detailed")
-        ? "Atualize o banco com a migration operacional antes de fechar o caixa."
-        : detailedResult.error.message,
+      message: detailedResult.error.message,
     };
   }
 
@@ -232,7 +259,7 @@ export async function finalizeSaleAction(input: {
   cardMachine?: string | null;
   items: Array<{ productId: string; quantity: number }>;
 }): Promise<ActionResult<{ saleId: string }>> {
-  await requireRole(["admin", "caixa"]);
+  const profile = await requireRole(["admin", "caixa"]);
   const parsed = saleSchema.safeParse(input);
 
   if (!parsed.success) {
@@ -258,10 +285,7 @@ export async function finalizeSaleAction(input: {
   });
 
   if (result.error) {
-    if (
-      isMissingSaleDetailSupport(result.error)
-      && parsed.data.paymentMethod !== "cartao"
-    ) {
+    if (isMissingSaleDetailSupport(result.error)) {
       const legacyResult = await supabase.rpc("finalize_sale", {
         p_cash_register_id: parsed.data.cashRegisterId,
         p_payment_method: parsed.data.paymentMethod,
@@ -272,6 +296,22 @@ export async function finalizeSaleAction(input: {
       });
 
       if (!legacyResult.error) {
+        const saleId = String(legacyResult.data);
+
+        if (parsed.data.paymentMethod === "cartao") {
+          await supabase.from("audit_logs").insert({
+            user_id: profile.id,
+            action: "sale.payment_details",
+            entity: "sales",
+            entity_id: saleId,
+            metadata: {
+              card_type: parsed.data.cardType ?? null,
+              card_machine: parsed.data.cardMachine?.trim() || "Principal",
+              legacy: true,
+            },
+          });
+        }
+
         revalidatePath("/caixa");
         revalidatePath("/admin");
         revalidatePath("/estoque");
@@ -279,8 +319,10 @@ export async function finalizeSaleAction(input: {
 
         return {
           ok: true,
-          message: "Venda finalizada.",
-          data: { saleId: String(legacyResult.data) },
+          message: parsed.data.paymentMethod === "cartao"
+            ? "Venda finalizada. Os detalhes do cartao foram salvos no historico."
+            : "Venda finalizada.",
+          data: { saleId },
         };
       }
 
@@ -292,9 +334,7 @@ export async function finalizeSaleAction(input: {
 
     return {
       ok: false,
-      message: isMissingSaleDetailSupport(result.error)
-        ? "Atualize o banco com a migration operacional antes de registrar vendas."
-        : result.error.message,
+      message: result.error.message,
     };
   }
 
@@ -314,7 +354,7 @@ export async function updatePreparationStatusAction(input: {
   saleId: string;
   status: PreparationStatus;
 }): Promise<ActionResult> {
-  await requireRole(["admin", "caixa"]);
+  const profile = await requireRole(["admin", "caixa"]);
   const parsed = preparationStatusSchema.safeParse(input);
 
   if (!parsed.success) {
@@ -328,11 +368,26 @@ export async function updatePreparationStatusAction(input: {
   });
 
   if (error) {
+    if (isMissingRpc(error, "update_sale_preparation_status")) {
+      const { error: auditError } = await supabase.from("audit_logs").insert({
+        user_id: profile.id,
+        action: "sale.preparation_status",
+        entity: "sales",
+        entity_id: parsed.data.saleId,
+        metadata: {
+          to: parsed.data.status,
+          legacy: true,
+        },
+      });
+
+      return auditError
+        ? { ok: false, message: auditError.message }
+        : { ok: true, message: "Status salvo no historico." };
+    }
+
     return {
       ok: false,
-      message: isMissingRpc(error, "update_sale_preparation_status")
-        ? "Aplique a migracao de preparo para alterar status."
-        : error.message,
+      message: error.message,
     };
   }
 

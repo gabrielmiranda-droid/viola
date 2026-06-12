@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   cashRegisterDifference,
   expectedCashTotal,
+  mergeSalePaymentDetails,
   salesByPayment,
 } from "./cash";
 
@@ -28,5 +29,21 @@ describe("cash rules", () => {
       closing_amount: 90,
       cash_difference: -8,
     })).toBe(-8);
+  });
+
+  it("recupera detalhes de cartao salvos na auditoria", () => {
+    expect(mergeSalePaymentDetails(
+      [{ id: "sale-1", total_amount: 40, payment_method: "cartao" }],
+      [{
+        entity_id: "sale-1",
+        metadata: { card_type: "credito", card_machine: "Principal" },
+      }],
+    )).toEqual([{
+      id: "sale-1",
+      total_amount: 40,
+      payment_method: "cartao",
+      card_type: "credito",
+      card_machine: "Principal",
+    }]);
   });
 });
