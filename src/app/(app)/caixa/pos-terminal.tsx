@@ -12,6 +12,8 @@ import {
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
   Banknote,
   Calculator,
   ChevronLeft,
@@ -497,6 +499,9 @@ function CashPanel({
   );
   const [cashAmount, setCashAmount] = useState("");
   const [pixAmount, setPixAmount] = useState("");
+  const [movementType, setMovementType] = useState<"entrada" | "saida">("saida");
+  const [movementAmount, setMovementAmount] = useState("");
+  const [movementReason, setMovementReason] = useState("");
   const [terminalRows, setTerminalRows] = useState<TerminalDraft[]>([
     {
       id: "terminal-1",
@@ -572,6 +577,11 @@ function CashPanel({
   const cashIn = movementsByType(cashMovements, "entrada");
   const cashOut = movementsByType(cashMovements, "saida");
   const expectedCash = Number(register.expected_amount);
+  const movementValue = asNumber(movementAmount);
+  const projectedCash =
+    expectedCash + (movementType === "entrada" ? movementValue : -movementValue);
+  const movementIsInvalid =
+    movementValue <= 0 || (movementType === "saida" && projectedCash < 0);
   const expectedByFormula = expectedCashTotal({
     opening: Number(register.opening_amount),
     cashSales,
@@ -622,53 +632,197 @@ function CashPanel({
     <Card className="overflow-hidden border-accent/15 bg-panel p-0">
       {activeTab === "movimentacao" ? (
         <div className="grid gap-4 border-t border-line bg-background/45 p-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-          <div className="rounded-lg border border-accent/25 bg-accent/5 p-4 xl:col-span-2">
-            <p className="text-xs font-black uppercase tracking-[0.1em] text-accent">
-              Movimentacao manual da gaveta
-            </p>
-            <p className="mt-1 text-sm text-slate-300">
-              Registre aqui somente dinheiro colocado ou retirado manualmente. Isso altera a
-              gaveta, mas nao altera o total vendido.
-            </p>
+          <div className="grid gap-3 xl:col-span-2 xl:grid-cols-[1.25fr_1fr]">
+            <div className="rounded-xl border border-accent/25 bg-accent/5 p-5">
+              <p className="text-xs font-black uppercase tracking-[0.1em] text-accent">
+                Dinheiro fisico da gaveta
+              </p>
+              <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="text-sm text-muted">Saldo disponivel agora</p>
+                  <p className="mt-1 text-4xl font-black text-white">{money(expectedCash)}</p>
+                </div>
+                <p className="max-w-xs text-sm text-slate-300">
+                  Entrada e retirada manual nao mudam o valor das vendas.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl border border-green-400/20 bg-green-400/10 p-4">
+                <p className="text-xs font-bold uppercase tracking-[0.08em] text-green-200">
+                  Entradas manuais
+                </p>
+                <p className="mt-2 text-2xl font-black text-green-200">{money(cashIn)}</p>
+                <p className="mt-1 text-xs text-muted">Dinheiro colocado</p>
+              </div>
+              <div className="rounded-xl border border-rose-400/20 bg-rose-400/10 p-4">
+                <p className="text-xs font-bold uppercase tracking-[0.08em] text-rose-100">
+                  Retiradas manuais
+                </p>
+                <p className="mt-2 text-2xl font-black text-rose-100">{money(cashOut)}</p>
+                <p className="mt-1 text-xs text-muted">Dinheiro retirado</p>
+              </div>
+            </div>
           </div>
 
-          <div className="grid gap-2 sm:grid-cols-2 xl:col-span-2 xl:grid-cols-4">
-            <Metric label="Vendas em dinheiro" value={cashSales} tone="good" />
-            <Metric label="Entradas manuais" value={cashIn} tone="good" />
-            <Metric label="Saidas manuais" value={cashOut} tone="bad" />
-            <Metric label="Saldo da gaveta" value={expectedCash} />
-          </div>
-
-          <form action={movementAction} className="rounded-lg border border-line bg-panel-strong/70 p-4">
+          <form action={movementAction} className="rounded-xl border border-line bg-panel-strong/70 p-5">
             <input type="hidden" name="cash_register_id" value={register.id} />
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-line bg-panel text-accent">
-                <Banknote className="h-5 w-5" />
-              </div>
-              <div>
-                <h3 className="font-black">Registrar movimento da gaveta</h3>
-                <p className="text-sm text-muted">Ex.: reforco de troco, sangria ou retirada.</p>
+            <input type="hidden" name="movement_type" value={movementType} />
+
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.1em] text-muted">
+                1. O que aconteceu?
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  aria-pressed={movementType === "entrada"}
+                  onClick={() => setMovementType("entrada")}
+                  className={cn(
+                    "flex min-h-24 items-center gap-4 rounded-xl border p-4 text-left transition",
+                    movementType === "entrada"
+                      ? "border-green-400 bg-green-400/15 shadow-[0_12px_30px_rgba(74,222,128,0.1)]"
+                      : "border-line bg-panel hover:border-green-400/40",
+                  )}
+                >
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-green-400/15 text-green-300">
+                    <ArrowDownToLine className="h-6 w-6" />
+                  </span>
+                  <span>
+                    <strong className="block text-base text-green-200">Colocar dinheiro</strong>
+                    <span className="mt-1 block text-xs text-muted">
+                      Reforco de troco ou outra entrada
+                    </span>
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  aria-pressed={movementType === "saida"}
+                  onClick={() => setMovementType("saida")}
+                  className={cn(
+                    "flex min-h-24 items-center gap-4 rounded-xl border p-4 text-left transition",
+                    movementType === "saida"
+                      ? "border-rose-400 bg-rose-400/15 shadow-[0_12px_30px_rgba(251,113,133,0.1)]"
+                      : "border-line bg-panel hover:border-rose-400/40",
+                  )}
+                >
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-rose-400/15 text-rose-200">
+                    <ArrowUpFromLine className="h-6 w-6" />
+                  </span>
+                  <span>
+                    <strong className="block text-base text-rose-100">Retirar dinheiro</strong>
+                    <span className="mt-1 block text-xs text-muted">
+                      Sangria, pagamento ou retirada
+                    </span>
+                  </span>
+                </button>
               </div>
             </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="movement_type">Tipo</Label>
-                <Select id="movement_type" name="movement_type" defaultValue="saida">
-                  <option value="entrada">Entrada na gaveta</option>
-                  <option value="saida">Saida da gaveta</option>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="amount">Valor movimentado</Label>
-                <Input id="amount" name="amount" type="number" min="0.01" step="0.01" required />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="reason">Motivo</Label>
-                <Input id="reason" name="reason" placeholder="Ex: sangria" required />
+
+            <div className="mt-5">
+              <p className="text-xs font-black uppercase tracking-[0.1em] text-muted">
+                2. Informe os dados
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="amount">Valor em dinheiro</Label>
+                  <Input
+                    id="amount"
+                    name="amount"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    placeholder="R$ 0,00"
+                    value={movementAmount}
+                    onChange={(event) => setMovementAmount(event.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="reason">Motivo da movimentacao</Label>
+                  <Input
+                    id="reason"
+                    name="reason"
+                    placeholder={movementType === "entrada" ? "Ex: reforco de troco" : "Ex: sangria"}
+                    value={movementReason}
+                    onChange={(event) => setMovementReason(event.target.value)}
+                    required
+                  />
+                </div>
               </div>
             </div>
-            <Button type="submit" variant="secondary" className="mt-4" disabled={movingCash}>
-              {movingCash ? "Registrando..." : "Confirmar movimentacao"}
+
+            <div
+              className={cn(
+                "mt-5 rounded-xl border p-4",
+                movementType === "entrada"
+                  ? "border-green-400/25 bg-green-400/8"
+                  : "border-rose-400/25 bg-rose-400/8",
+              )}
+            >
+              <p className="text-xs font-black uppercase tracking-[0.1em] text-muted">
+                3. Confira o resultado
+              </p>
+              <div className="mt-3 grid grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-2 text-center">
+                <div>
+                  <p className="text-xs text-muted">Saldo atual</p>
+                  <strong className="mt-1 block">{money(expectedCash)}</strong>
+                </div>
+                <span className="text-lg text-muted">
+                  {movementType === "entrada" ? "+" : "-"}
+                </span>
+                <div>
+                  <p className="text-xs text-muted">
+                    {movementType === "entrada" ? "Entrada" : "Retirada"}
+                  </p>
+                  <strong
+                    className={cn(
+                      "mt-1 block",
+                      movementType === "entrada" ? "text-green-300" : "text-rose-200",
+                    )}
+                  >
+                    {money(movementValue)}
+                  </strong>
+                </div>
+                <span className="text-lg text-muted">=</span>
+                <div>
+                  <p className="text-xs text-muted">Novo saldo</p>
+                  <strong
+                    className={cn(
+                      "mt-1 block text-lg",
+                      projectedCash < 0 ? "text-rose-200" : "text-white",
+                    )}
+                  >
+                    {money(projectedCash)}
+                  </strong>
+                </div>
+              </div>
+              {projectedCash < 0 ? (
+                <p className="mt-3 text-center text-sm font-semibold text-rose-200">
+                  A retirada e maior que o saldo disponivel na gaveta.
+                </p>
+              ) : null}
+            </div>
+
+            <Button
+              type="submit"
+              variant={movementType === "entrada" ? "success" : "danger"}
+              size="lg"
+              className="mt-4 w-full"
+              disabled={movingCash || movementIsInvalid || !movementReason.trim()}
+            >
+              {movementType === "entrada" ? (
+                <ArrowDownToLine className="h-5 w-5" />
+              ) : (
+                <ArrowUpFromLine className="h-5 w-5" />
+              )}
+              {movingCash
+                ? "Registrando..."
+                : movementType === "entrada"
+                  ? `Confirmar entrada de ${money(movementValue)}`
+                  : `Confirmar retirada de ${money(movementValue)}`}
             </Button>
             <FormMessage state={movementState} />
           </form>
@@ -677,7 +831,7 @@ function CashPanel({
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="font-black">Ultimas movimentacoes</h3>
-                <p className="text-sm text-muted">Somente entradas e saidas manuais da gaveta.</p>
+                <p className="text-sm text-muted">Historico manual deste caixa aberto.</p>
               </div>
               <Badge variant="neutral">{quantity(cashMovements.length)}</Badge>
             </div>
@@ -687,7 +841,12 @@ function CashPanel({
                 cashMovements.slice(0, 7).map((movement) => (
                   <div
                     key={movement.id}
-                    className="rounded-lg border border-line bg-panel p-3"
+                    className={cn(
+                      "rounded-xl border p-3",
+                      movement.movement_type === "entrada"
+                        ? "border-green-400/20 bg-green-400/5"
+                        : "border-rose-400/20 bg-rose-400/5",
+                    )}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
