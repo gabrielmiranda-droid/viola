@@ -186,8 +186,6 @@ export default async function AdminDashboardPage() {
 
   if (todaySalesResult.error) throw todaySalesResult.error;
   if (monthSalesResult.error) throw monthSalesResult.error;
-  if (cancellationsResult.error) throw cancellationsResult.error;
-  if (activeRegistersResult.error) throw activeRegistersResult.error;
 
   const todaySales = todaySalesResult.data;
   const monthSales = monthSalesResult.data;
@@ -213,7 +211,9 @@ export default async function AdminDashboardPage() {
     .filter(productTracksStock)
     .filter((product) => Number(product.quantity) <= Number(product.min_stock))
     .slice(0, 8);
-  const cancellations = (cancellationsResult.data ?? []) as unknown as SaleRow[];
+  const cancellations = cancellationsResult.error
+    ? []
+    : (cancellationsResult.data ?? []) as unknown as SaleRow[];
   let registers = (registersResult.data ?? []) as unknown as CashRegisterRow[];
 
   if (registersResult.error) {
@@ -253,7 +253,9 @@ export default async function AdminDashboardPage() {
   const monthRevenue = total(monthSales, "total_amount");
   const averageTicket = todaySales.length ? todayRevenue / todaySales.length : 0;
   const savedExpectedCash = sumMoney(registers.map((register) => register.expected_amount));
-  const activeRegisters = activeRegistersResult.data ?? [];
+  const activeRegisters = activeRegistersResult.error
+    ? registers.filter((register) => register.status === "open")
+    : activeRegistersResult.data ?? [];
   const openCashNow = sumMoney(activeRegisters.map((register) => register.expected_amount));
   const closedDifference = sumMoney(
     registers
