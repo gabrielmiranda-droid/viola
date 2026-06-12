@@ -367,11 +367,11 @@ function CashRegisterSummary({
                   <strong className="text-green-300">+ {money(cashSales)}</strong>
                 </div>
                 <div>
-                  <p className="text-muted">Entradas manuais</p>
+                  <p className="text-muted">Outras entradas em dinheiro</p>
                   <strong className="text-green-300">+ {money(cashIn)}</strong>
                 </div>
                 <div>
-                  <p className="text-muted">Saidas da gaveta</p>
+                  <p className="text-muted">Pagamentos e saidas</p>
                   <strong className="text-rose-200">- {money(cashOut)}</strong>
                 </div>
               </div>
@@ -417,9 +417,9 @@ function CashRegisterSummary({
           <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-background/45 p-3 text-sm">
             <strong>Conta da gaveta:</strong>
             <span className="text-muted">{money(opening)} abertura</span>
-            <span className="text-green-300">+ {money(cashSales)} vendas</span>
-            <span className="text-green-300">+ {money(cashIn)} entradas</span>
-            <span className="text-rose-200">- {money(cashOut)} saidas</span>
+            <span className="text-green-300">+ {money(cashSales)} vendas em dinheiro</span>
+            <span className="text-green-300">+ {money(cashIn)} outras entradas</span>
+            <span className="text-rose-200">- {money(cashOut)} pagamentos/saidas</span>
             <strong>= {money(drawerNow)}</strong>
             {Math.abs(formulaDifference) > 0.009 ? (
               <span className="text-amber-200">Conferir {money(formulaDifference)}</span>
@@ -592,7 +592,7 @@ function CashPanel({
     terminalRows.some((row) => row.pixAmount.trim() !== "");
   const allClosingValuesEntered = hasCashCount && hasCardCount && hasPixCount;
   const totalDifference = cashDifference + cardDifference + pixDifference;
-  const cashDayMovement = cashSales + cashIn - cashOut;
+  const cashEnteredToday = cashSales + cashIn;
 
   function updateTerminalRow(id: string, field: keyof TerminalDraft, value: string) {
     setTerminalRows((current) =>
@@ -636,17 +636,17 @@ function CashPanel({
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl border border-green-400/20 bg-green-400/10 p-4">
                 <p className="text-xs font-bold uppercase tracking-[0.08em] text-green-200">
-                  Entradas manuais
+                  Outras entradas
                 </p>
                 <p className="mt-2 text-2xl font-black text-green-200">{money(cashIn)}</p>
-                <p className="mt-1 text-xs text-muted">Dinheiro colocado</p>
+                <p className="mt-1 text-xs text-muted">Dinheiro colocado manualmente</p>
               </div>
               <div className="rounded-xl border border-rose-400/20 bg-rose-400/10 p-4">
                 <p className="text-xs font-bold uppercase tracking-[0.08em] text-rose-100">
-                  Retiradas manuais
+                  Pagamentos e saidas
                 </p>
                 <p className="mt-2 text-2xl font-black text-rose-100">{money(cashOut)}</p>
-                <p className="mt-1 text-xs text-muted">Dinheiro retirado</p>
+                <p className="mt-1 text-xs text-muted">Motoboy, compras, sangria ou retirada</p>
               </div>
             </div>
           </div>
@@ -699,7 +699,7 @@ function CashPanel({
                   <span>
                     <strong className="block text-base text-rose-100">Retirar dinheiro</strong>
                     <span className="mt-1 block text-xs text-muted">
-                      Sangria, pagamento ou retirada
+                      Motoboy, compra, sangria ou retirada
                     </span>
                   </span>
                 </button>
@@ -730,7 +730,11 @@ function CashPanel({
                   <Input
                     id="reason"
                     name="reason"
-                    placeholder={movementType === "entrada" ? "Ex: reforco de troco" : "Ex: sangria"}
+                    placeholder={
+                      movementType === "entrada"
+                        ? "Ex: reforco de troco"
+                        : "Ex: pagamento do motoboy"
+                    }
                     value={movementReason}
                     onChange={(event) => setMovementReason(event.target.value)}
                     required
@@ -905,7 +909,7 @@ function CashPanel({
                   </div>
                 </div>
 
-                <div className="mt-4 grid grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-2 rounded-lg border border-line bg-background/40 p-3 text-center">
+                <div className="mt-4 grid gap-2 rounded-lg border border-line bg-background/40 p-3 sm:grid-cols-2 xl:grid-cols-5">
                   <div>
                     <p className="text-xs text-muted">Saldo inicial</p>
                     <strong className="mt-1 block">{money(Number(register.opening_amount))}</strong>
@@ -913,44 +917,49 @@ function CashPanel({
                       Ja estava no caixa
                     </span>
                   </div>
-                  <span className="text-lg text-muted">
-                    {cashDayMovement >= 0 ? "+" : "-"}
-                  </span>
-                  <div>
-                    <p className="text-xs text-muted">Movimento de hoje</p>
-                    <strong
-                      className={cn(
-                        "mt-1 block",
-                        cashDayMovement >= 0 ? "text-green-300" : "text-rose-200",
-                      )}
-                    >
-                      {money(Math.abs(cashDayMovement))}
-                    </strong>
+                  <div className="rounded-lg bg-green-400/5 p-2">
+                    <p className="text-xs text-muted">+ Vendas em dinheiro</p>
+                    <strong className="mt-1 block text-green-300">{money(cashSales)}</strong>
                     <span className="mt-1 block text-[0.68rem] text-slate-400">
-                      Entradas menos saidas
+                      Recebido dos clientes
                     </span>
                   </div>
-                  <span className="text-lg text-muted">=</span>
-                  <div>
-                    <p className="text-xs text-muted">Total na gaveta</p>
+                  <div className="rounded-lg bg-green-400/5 p-2">
+                    <p className="text-xs text-muted">+ Outras entradas</p>
+                    <strong className="mt-1 block text-green-300">{money(cashIn)}</strong>
+                    <span className="mt-1 block text-[0.68rem] text-slate-400">
+                      Dinheiro colocado
+                    </span>
+                  </div>
+                  <div className="rounded-lg bg-rose-400/5 p-2">
+                    <p className="text-xs text-muted">- Pagamentos e saidas</p>
+                    <strong className="mt-1 block text-rose-200">{money(cashOut)}</strong>
+                    <span className="mt-1 block text-[0.68rem] text-slate-400">
+                      Motoboy, compras e retiradas
+                    </span>
+                  </div>
+                  <div className="rounded-lg border border-accent/20 bg-accent/5 p-2">
+                    <p className="text-xs text-muted">= Total na gaveta</p>
                     <strong className="mt-1 block text-lg text-white">{money(expectedCash)}</strong>
                     <span className="mt-1 block text-[0.68rem] text-slate-400">
-                      Valor esperado
+                      Dinheiro esperado agora
                     </span>
                   </div>
                 </div>
 
                 <div className="mt-3 grid grid-cols-3 gap-2 text-center text-sm">
                   <div className="rounded-lg border border-green-400/15 bg-green-400/5 p-2">
-                    <p className="text-xs text-muted">Vendas em dinheiro</p>
-                    <strong className="mt-1 block text-green-300">+ {money(cashSales)}</strong>
+                    <p className="text-xs text-muted">Total que entrou hoje</p>
+                    <strong className="mt-1 block text-green-300">
+                      + {money(cashEnteredToday)}
+                    </strong>
                   </div>
                   <div className="rounded-lg border border-green-400/15 bg-green-400/5 p-2">
-                    <p className="text-xs text-muted">Entradas manuais</p>
-                    <strong className="mt-1 block text-green-300">+ {money(cashIn)}</strong>
+                    <p className="text-xs text-muted">Dessas, vendas em dinheiro</p>
+                    <strong className="mt-1 block text-green-300">{money(cashSales)}</strong>
                   </div>
                   <div className="rounded-lg border border-rose-400/15 bg-rose-400/5 p-2">
-                    <p className="text-xs text-muted">Retiradas</p>
+                    <p className="text-xs text-muted">Total que saiu hoje</p>
                     <strong className="mt-1 block text-rose-200">- {money(cashOut)}</strong>
                   </div>
                 </div>
@@ -1190,10 +1199,12 @@ function CashPanel({
                       <strong>{money(Number(register.opening_amount))}</strong>
                     </div>
                     <div className="mt-2 flex items-center justify-between gap-3">
-                      <span className="text-muted">Movimento da gaveta hoje</span>
-                      <strong className={cashDayMovement >= 0 ? "text-green-300" : "text-rose-200"}>
-                        {cashDayMovement >= 0 ? "+" : "-"} {money(Math.abs(cashDayMovement))}
-                      </strong>
+                      <span className="text-muted">Entrou em dinheiro hoje</span>
+                      <strong className="text-green-300">+ {money(cashEnteredToday)}</strong>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-3">
+                      <span className="text-muted">Saiu em dinheiro hoje</span>
+                      <strong className="text-rose-200">- {money(cashOut)}</strong>
                     </div>
                     <p className="mt-3 text-xs text-muted">
                       O dinheiro inicial permanece na gaveta, mas nao entra no total vendido.
