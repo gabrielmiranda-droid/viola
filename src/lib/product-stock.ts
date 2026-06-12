@@ -1,6 +1,6 @@
 import type { Product } from "@/lib/types";
 
-export const PREPARED_PRODUCT_FALLBACK_QUANTITY = 0;
+export const PREPARED_PRODUCT_FALLBACK_QUANTITY = 999999;
 
 const preparedKeywords = [
   "lanche",

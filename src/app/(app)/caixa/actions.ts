@@ -258,6 +258,38 @@ export async function finalizeSaleAction(input: {
   });
 
   if (result.error) {
+    if (
+      isMissingSaleDetailSupport(result.error)
+      && parsed.data.paymentMethod !== "cartao"
+    ) {
+      const legacyResult = await supabase.rpc("finalize_sale", {
+        p_cash_register_id: parsed.data.cashRegisterId,
+        p_payment_method: parsed.data.paymentMethod,
+        p_items: parsed.data.items.map((item) => ({
+          product_id: item.productId,
+          quantity: item.quantity,
+        })),
+      });
+
+      if (!legacyResult.error) {
+        revalidatePath("/caixa");
+        revalidatePath("/admin");
+        revalidatePath("/estoque");
+        revalidatePath("/relatorios");
+
+        return {
+          ok: true,
+          message: "Venda finalizada.",
+          data: { saleId: String(legacyResult.data) },
+        };
+      }
+
+      return {
+        ok: false,
+        message: legacyResult.error.message,
+      };
+    }
+
     return {
       ok: false,
       message: isMissingSaleDetailSupport(result.error)
