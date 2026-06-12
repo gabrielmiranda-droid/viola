@@ -9,8 +9,8 @@ import { requireAdmin } from "@/lib/auth";
 import {
   cardSalesByType,
   cardSalesWithoutType,
+  cashFlowSummary,
   cashRegisterDifference,
-  expectedCashTotal,
   groupSalesByMachine,
   mergeSalePaymentDetails,
   movementsByType,
@@ -187,13 +187,24 @@ export default async function ReportsPage({
   const monthStart = month.start.slice(0, 10);
   const range = rangeFromSearch(params?.start, params?.end);
   const supabase = await createClient();
+  const { data: resetLog } = await supabase
+    .from("audit_logs")
+    .select("created_at")
+    .eq("action", "operational_history.reset")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ created_at: string }>();
+  const rangeStart =
+    resetLog?.created_at && resetLog.created_at > range.start
+      ? resetLog.created_at
+      : range.start;
 
   const [salesResult, registersResult, movementsResult, terminalClosingsResult] = await Promise.all([
     fetchAllPages<SaleRow>((from, to) =>
       supabase
         .from("sales")
         .select("id,cash_register_id,total_amount,total_cost,gross_profit,payment_method,status,card_type,card_machine,preparation_status,created_at,users(name,email)")
-        .gte("created_at", range.start)
+        .gte("created_at", rangeStart)
         .lte("created_at", range.end)
         .order("created_at", { ascending: false })
         .range(from, to) as unknown as PromiseLike<{ data: SaleRow[] | null; error: { message: string; code?: string } | null }>,
@@ -202,7 +213,7 @@ export default async function ReportsPage({
       supabase
         .from("cash_registers")
         .select("id,opened_at,closed_at,opening_amount,closing_amount,expected_amount,cash_difference,sales_amount,status,users(name,email)")
-        .gte("opened_at", range.start)
+        .gte("opened_at", rangeStart)
         .lte("opened_at", range.end)
         .order("opened_at", { ascending: false })
         .range(from, to) as unknown as PromiseLike<{ data: CashRegisterRow[] | null; error: { message: string; code?: string } | null }>,
@@ -211,7 +222,7 @@ export default async function ReportsPage({
       supabase
         .from("cash_movements")
         .select("id,cash_register_id,movement_type,amount,reason,created_at,users(name,email)")
-        .gte("created_at", range.start)
+        .gte("created_at", rangeStart)
         .lte("created_at", range.end)
         .order("created_at", { ascending: false })
         .range(from, to) as unknown as PromiseLike<{ data: CashMovementRow[] | null; error: { message: string; code?: string } | null }>,
@@ -220,7 +231,7 @@ export default async function ReportsPage({
       supabase
         .from("cash_terminal_closings")
         .select("id,cash_register_id,terminal_name,credit_amount,debit_amount,pix_amount,created_at")
-        .gte("created_at", range.start)
+        .gte("created_at", rangeStart)
         .lte("created_at", range.end)
         .order("created_at", { ascending: false })
         .range(from, to) as unknown as PromiseLike<{ data: TerminalClosingRow[] | null; error: { message: string; code?: string } | null }>,
@@ -233,7 +244,7 @@ export default async function ReportsPage({
       supabase
         .from("sales")
         .select("id,cash_register_id,total_amount,total_cost,gross_profit,payment_method,status,created_at,users(name,email)")
-        .gte("created_at", range.start)
+        .gte("created_at", rangeStart)
         .lte("created_at", range.end)
         .order("created_at", { ascending: false })
         .range(from, to) as unknown as PromiseLike<{ data: SaleRow[] | null; error: { message: string; code?: string } | null }>,
@@ -279,7 +290,7 @@ export default async function ReportsPage({
       supabase
         .from("cash_registers")
         .select("id,opened_at,closed_at,opening_amount,closing_amount,expected_amount,sales_amount,status,users(name,email)")
-        .gte("opened_at", range.start)
+        .gte("opened_at", rangeStart)
         .lte("opened_at", range.end)
         .order("opened_at", { ascending: false })
         .range(from, to) as unknown as PromiseLike<{ data: CashRegisterRow[] | null; error: { message: string; code?: string } | null }>,
@@ -298,7 +309,7 @@ export default async function ReportsPage({
         .select("id,entity_id,metadata,created_at,users(name,email)")
         .like("action", "cash_movement.%")
         .not("metadata->>cash_register_id", "is", null)
-        .gte("created_at", range.start)
+        .gte("created_at", rangeStart)
         .lte("created_at", range.end)
         .order("created_at", { ascending: false })
         .range(from, to) as unknown as PromiseLike<{ data: CashMovementAuditRow[] | null; error: { message: string; code?: string } | null }>,
@@ -324,15 +335,15 @@ export default async function ReportsPage({
   const cardSalesUnknown = cardSalesWithoutType(sales);
   const cashIn = movementsByType(movements, "entrada");
   const cashOut = movementsByType(movements, "saida");
-  const cashEntered = cashSales + cashIn;
   const openingTotal = sumMoney(registers.map((register) => register.opening_amount));
-  const expectedCash = sumMoney(registers.map((register) => register.expected_amount));
-  const expectedByFormula = expectedCashTotal({
+  const cashFlow = cashFlowSummary({
     opening: openingTotal,
     cashSales,
     cashIn,
     cashOut,
   });
+  const expectedCash = sumMoney(registers.map((register) => register.expected_amount));
+  const expectedByFormula = cashFlow.expectedCash;
   const countedCash = sumMoney(
     registers
       .filter((register) => register.status === "closed")
@@ -484,21 +495,45 @@ export default async function ReportsPage({
       <Card className="mt-4 border-accent/20">
         <SectionTitle
           number="2"
-          title="Dinheiro do periodo"
+          title="Movimento de dinheiro do periodo"
           aside={
-            <Badge variant={Math.abs(cashDifference) > 0.009 ? "warning" : "success"}>
-              Diferenca {money(cashDifference)}
-            </Badge>
+            closedRegisters ? (
+              <Badge variant={Math.abs(cashDifference) > 0.009 ? "warning" : "success"}>
+                Diferenca fechada {money(cashDifference)}
+              </Badge>
+            ) : (
+              <Badge variant="neutral">Sem caixa fechado</Badge>
+            )
           }
         />
         <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-          <Metric label="Comecou com" value={openingTotal} />
-          <Metric label="Entrou dinheiro" value={cashEntered} tone="good" />
-          <Metric label="Saiu dinheiro" value={cashOut} tone="bad" />
-          <Metric label="Era para ter" value={expectedCash} />
-          <Metric label="Foi contado" value={countedCash} />
-          <Metric label="Diferenca" value={cashDifference} tone={Math.abs(cashDifference) > 0.009 ? "bad" : "default"} />
+          <Metric label="Saldo inicial" value={cashFlow.opening} />
+          <Metric label="Vendas em dinheiro" value={cashFlow.cashSales} tone="good" />
+          <Metric label="Outras entradas" value={cashFlow.otherCashIn} tone="good" />
+          <Metric label="Pagamentos e saidas" value={cashFlow.cashOut} tone="bad" />
+          <Metric label="Esperado nas gavetas" value={expectedCash} />
+          <Metric
+            label={closedRegisters ? "Diferenca fechada" : "Ainda nao contado"}
+            value={closedRegisters ? cashDifference : 0}
+            tone={closedRegisters && Math.abs(cashDifference) > 0.009 ? "bad" : "default"}
+          />
         </div>
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 rounded-lg border border-line bg-background/40 p-3 text-sm">
+          <span>{money(cashFlow.opening)} inicial</span>
+          <span className="text-green-300">+ {money(cashFlow.cashSales)} vendas em dinheiro</span>
+          <span className="text-green-300">
+            + {money(cashFlow.otherCashIn)} outras entradas
+          </span>
+          <span className="text-rose-200">
+            - {money(cashFlow.cashOut)} pagamentos/saidas
+          </span>
+          <strong>= {money(cashFlow.expectedCash)} pela formula</strong>
+        </div>
+        {closedRegisters ? (
+          <p className="mt-3 text-sm text-muted">
+            Dinheiro contado somente nos caixas fechados: {money(countedCash)}.
+          </p>
+        ) : null}
         {Math.abs(expectedFormulaDifference) > 0.009 ? (
           <p className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100">
             Conferir: o esperado salvo difere da formula em {money(expectedFormulaDifference)}.
@@ -649,13 +684,22 @@ export default async function ReportsPage({
           </details>
 
           <details className="rounded-lg border border-line bg-panel-strong p-3">
-            <summary className="cursor-pointer font-bold">Dinheiro que entrou/saiu ({movements.length})</summary>
+            <summary className="cursor-pointer font-bold">
+              Outras entradas, pagamentos e saidas ({movements.length})
+            </summary>
             <div className="mt-3">
               {movements.length ? (
                 <div className="grid gap-2 md:grid-cols-2">
                   {movements.map((movement) => (
                     <div key={movement.id} className="flex justify-between gap-3 rounded-lg border border-line bg-panel p-3">
                       <div className="min-w-0">
+                        <Badge
+                          variant={movement.movement_type === "entrada" ? "success" : "warning"}
+                        >
+                          {movement.movement_type === "entrada"
+                            ? "Outra entrada"
+                            : "Pagamento/saida"}
+                        </Badge>
                         <p className="truncate font-semibold">{movement.reason}</p>
                         <p className="text-sm text-muted">
                           {personName(movement)} - {dateTime(movement.created_at)}

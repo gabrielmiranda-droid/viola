@@ -154,12 +154,20 @@ function Metric({
 export default async function InventoryPage() {
   await requireAdmin();
   const supabase = await createClient();
+  const { data: resetLog } = await supabase
+    .from("audit_logs")
+    .select("created_at")
+    .eq("action", "operational_history.reset")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ created_at: string }>();
 
   const [{ products, hasInventoryColumns }, { data: movements }] = await Promise.all([
     loadProducts(supabase),
     supabase
       .from("stock_movements")
       .select("id,movement_type,quantity,quantity_before,quantity_after,reason,created_at,products(name),users(name,email)")
+      .gte("created_at", resetLog?.created_at ?? "1970-01-01T00:00:00.000Z")
       .order("created_at", { ascending: false })
       .limit(10),
   ]);

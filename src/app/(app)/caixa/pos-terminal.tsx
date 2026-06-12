@@ -40,6 +40,7 @@ import { useToast } from "@/components/ui/toast";
 import {
   cardSalesByType,
   cardSalesWithoutType,
+  cashFlowSummary,
   expectedCashTotal,
   mergeSalePaymentDetails,
   movementsByType,
@@ -119,6 +120,11 @@ const paymentOptions: Array<{ value: PaymentMethod; label: string }> = [
   { value: "dinheiro", label: "Dinheiro" },
   { value: "cartao", label: "Cartao" },
 ];
+
+const movementReasons = {
+  entrada: ["Reforco de troco", "Devolucao recebida", "Outro recebimento"],
+  saida: ["Pagamento do motoboy", "Compra de insumos", "Sangria", "Retirada"],
+} as const;
 
 function asNumber(value: string | number | null | undefined) {
   const number = Number(value ?? 0);
@@ -551,6 +557,12 @@ function CashPanel({
   const cashIn = movementsByType(cashMovements, "entrada");
   const cashOut = movementsByType(cashMovements, "saida");
   const expectedCash = Number(register.expected_amount);
+  const cashFlow = cashFlowSummary({
+    opening: Number(register.opening_amount),
+    cashSales,
+    cashIn,
+    cashOut,
+  });
   const movementValue = asNumber(movementAmount);
   const projectedCash =
     expectedCash + (movementType === "entrada" ? movementValue : -movementValue);
@@ -592,7 +604,7 @@ function CashPanel({
     terminalRows.some((row) => row.pixAmount.trim() !== "");
   const allClosingValuesEntered = hasCashCount && hasCardCount && hasPixCount;
   const totalDifference = cashDifference + cardDifference + pixDifference;
-  const cashEnteredToday = cashSales + cashIn;
+  const cashEnteredToday = cashFlow.totalCashIn;
 
   function updateTerminalRow(id: string, field: keyof TerminalDraft, value: string) {
     setTerminalRows((current) =>
@@ -739,6 +751,28 @@ function CashPanel({
                     onChange={(event) => setMovementReason(event.target.value)}
                     required
                   />
+                </div>
+              </div>
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-muted">Motivos rapidos</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {movementReasons[movementType].map((reason) => (
+                    <button
+                      key={reason}
+                      type="button"
+                      onClick={() => setMovementReason(reason)}
+                      className={cn(
+                        "min-h-9 rounded-lg border px-3 text-xs font-semibold transition",
+                        movementReason === reason
+                          ? movementType === "entrada"
+                            ? "border-green-400 bg-green-400/15 text-green-200"
+                            : "border-rose-400 bg-rose-400/15 text-rose-100"
+                          : "border-line bg-panel text-muted hover:border-accent/40 hover:text-white",
+                      )}
+                    >
+                      {reason}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
@@ -919,21 +953,23 @@ function CashPanel({
                   </div>
                   <div className="rounded-lg bg-green-400/5 p-2">
                     <p className="text-xs text-muted">+ Vendas em dinheiro</p>
-                    <strong className="mt-1 block text-green-300">{money(cashSales)}</strong>
+                    <strong className="mt-1 block text-green-300">{money(cashFlow.cashSales)}</strong>
                     <span className="mt-1 block text-[0.68rem] text-slate-400">
                       Recebido dos clientes
                     </span>
                   </div>
                   <div className="rounded-lg bg-green-400/5 p-2">
                     <p className="text-xs text-muted">+ Outras entradas</p>
-                    <strong className="mt-1 block text-green-300">{money(cashIn)}</strong>
+                    <strong className="mt-1 block text-green-300">
+                      {money(cashFlow.otherCashIn)}
+                    </strong>
                     <span className="mt-1 block text-[0.68rem] text-slate-400">
                       Dinheiro colocado
                     </span>
                   </div>
                   <div className="rounded-lg bg-rose-400/5 p-2">
                     <p className="text-xs text-muted">- Pagamentos e saidas</p>
-                    <strong className="mt-1 block text-rose-200">{money(cashOut)}</strong>
+                    <strong className="mt-1 block text-rose-200">{money(cashFlow.cashOut)}</strong>
                     <span className="mt-1 block text-[0.68rem] text-slate-400">
                       Motoboy, compras e retiradas
                     </span>

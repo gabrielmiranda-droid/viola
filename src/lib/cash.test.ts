@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  cashFlowSummary,
   cashRegisterDifference,
   expectedCashTotal,
   mergeSalePaymentDetails,
@@ -21,6 +22,23 @@ describe("cash rules", () => {
       cashIn: 20,
       cashOut: 30,
     })).toBe(170);
+  });
+
+  it("separa saldo inicial, vendas, outras entradas e saidas", () => {
+    expect(cashFlowSummary({
+      opening: 1000,
+      cashSales: 25,
+      cashIn: 50,
+      cashOut: 30,
+    })).toEqual({
+      opening: 1000,
+      cashSales: 25,
+      otherCashIn: 50,
+      cashOut: 30,
+      totalCashIn: 75,
+      netCashMovement: 45,
+      expectedCash: 1045,
+    });
   });
 
   it("prioriza a diferenca persistida no fechamento", () => {

@@ -156,6 +156,31 @@ export function expectedCashTotal({
   return opening + cashSales + cashIn - cashOut;
 }
 
+export function cashFlowSummary({
+  opening,
+  cashSales,
+  cashIn,
+  cashOut,
+}: {
+  opening: number;
+  cashSales: number;
+  cashIn: number;
+  cashOut: number;
+}) {
+  const totalCashIn = cashSales + cashIn;
+  const netCashMovement = totalCashIn - cashOut;
+
+  return {
+    opening,
+    cashSales,
+    otherCashIn: cashIn,
+    cashOut,
+    totalCashIn,
+    netCashMovement,
+    expectedCash: opening + netCashMovement,
+  };
+}
+
 export function cashRegisterDifference(register: CashRegisterLike) {
   if (register.cash_difference !== null && register.cash_difference !== undefined) {
     return Number(register.cash_difference);

@@ -5,7 +5,13 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { SectionHeader } from "@/components/ui/section-header";
 import { StatCard } from "@/components/ui/stat-card";
 import { requireAdmin } from "@/lib/auth";
-import { cashRegisterDifference, movementsByType, salesByPayment, sumMoney } from "@/lib/cash";
+import {
+  cashFlowSummary,
+  cashRegisterDifference,
+  movementsByType,
+  salesByPayment,
+  sumMoney,
+} from "@/lib/cash";
 import { monthRange, todayRange } from "@/lib/dates";
 import { dateTime, money, paymentLabel, quantity } from "@/lib/format";
 import { defaultTrackStockForCategory, productTracksStock } from "@/lib/product-stock";
@@ -21,6 +27,7 @@ import {
   TrendingUp,
   Users,
 } from "lucide-react";
+import { ResetHistoryForm } from "./reset-history-form";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 20;
@@ -47,6 +54,7 @@ type ProductRow = {
 
 type CashRegisterRow = {
   id: string;
+  opening_amount: number;
   expected_amount: number;
   closing_amount: number | null;
   cash_difference: number | null;
@@ -99,6 +107,16 @@ export default async function AdminDashboardPage() {
   const supabase = await createClient();
   const today = todayRange();
   const month = monthRange();
+  const { data: resetLog } = await supabase
+    .from("audit_logs")
+    .select("created_at")
+    .eq("action", "operational_history.reset")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ created_at: string }>();
+  const resetAt = resetLog?.created_at;
+  const todayStart = resetAt && resetAt > today.start ? resetAt : today.start;
+  const monthStart = resetAt && resetAt > month.start ? resetAt : month.start;
 
   const [
     todaySalesResult,
@@ -113,7 +131,7 @@ export default async function AdminDashboardPage() {
         .from("sales")
         .select("id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users(name,email)")
         .eq("status", "completed")
-        .gte("created_at", today.start)
+        .gte("created_at", todayStart)
         .lte("created_at", today.end)
         .order("created_at", { ascending: false })
         .range(from, to) as unknown as PromiseLike<{ data: SaleRow[] | null; error: { message: string; code?: string } | null }>,
@@ -123,7 +141,7 @@ export default async function AdminDashboardPage() {
         .from("sales")
         .select("id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users(name,email)")
         .eq("status", "completed")
-        .gte("created_at", month.start)
+        .gte("created_at", monthStart)
         .lt("created_at", month.end)
         .order("created_at", { ascending: false })
         .range(from, to) as unknown as PromiseLike<{ data: SaleRow[] | null; error: { message: string; code?: string } | null }>,
@@ -142,14 +160,14 @@ export default async function AdminDashboardPage() {
       .limit(6),
     supabase
       .from("cash_registers")
-      .select("id,expected_amount,closing_amount,cash_difference,status")
-      .gte("opened_at", today.start)
+      .select("id,opening_amount,expected_amount,closing_amount,cash_difference,status")
+      .gte("opened_at", todayStart)
       .lte("opened_at", today.end)
       .limit(80),
     supabase
       .from("cash_movements")
       .select("movement_type,amount")
-      .gte("created_at", today.start)
+      .gte("created_at", todayStart)
       .lte("created_at", today.end)
       .limit(400),
   ]);
@@ -188,8 +206,8 @@ export default async function AdminDashboardPage() {
   if (registersResult.error) {
     const fallback = await supabase
         .from("cash_registers")
-        .select("id,expected_amount,closing_amount,status")
-        .gte("opened_at", today.start)
+        .select("id,opening_amount,expected_amount,closing_amount,status")
+        .gte("opened_at", todayStart)
         .lte("opened_at", today.end)
         .limit(80);
 
@@ -205,7 +223,7 @@ export default async function AdminDashboardPage() {
       .from("audit_logs")
       .select("metadata")
       .like("action", "cash_movement.%")
-      .gte("created_at", today.start)
+      .gte("created_at", todayStart)
       .lte("created_at", today.end)
       .limit(400);
 
@@ -232,7 +250,12 @@ export default async function AdminDashboardPage() {
   const cardSales = salesByPayment(todaySales, "cartao");
   const cashIn = movementsByType(movements, "entrada");
   const cashOut = movementsByType(movements, "saida");
-  const cashEntered = cashSales + cashIn;
+  const cashFlow = cashFlowSummary({
+    opening: sumMoney(registers.map((register) => register.opening_amount)),
+    cashSales,
+    cashIn,
+    cashOut,
+  });
   const openRegisters = registers.filter((register) => register.status === "open").length;
   const closedRegisters = registers.filter((register) => register.status === "closed").length;
   const saleIds = todaySales.map((sale) => sale.id);
@@ -329,35 +352,49 @@ export default async function AdminDashboardPage() {
             <h2 className="font-black">Dinheiro de hoje</h2>
             <p className="text-sm text-muted">Somando todos os caixas abertos hoje.</p>
           </div>
-          <Badge>Na gaveta {money(expectedCash)}</Badge>
+          <Badge>Esperado nas gavetas {money(expectedCash)}</Badge>
         </div>
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <div className="rounded-lg border border-line bg-panel-strong p-3">
+            <p className="text-sm text-muted">Saldo inicial</p>
+            <p className="font-bold">{money(cashFlow.opening)}</p>
+            <p className="mt-1 text-xs text-muted">Ja estava nos caixas</p>
+          </div>
           <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-3">
-            <p className="text-sm text-muted">Entrou dinheiro</p>
-            <p className="font-bold text-green-300">{money(cashEntered)}</p>
-            <p className="mt-1 text-xs text-muted">Vendas + entradas</p>
+            <p className="text-sm text-muted">Vendas em dinheiro</p>
+            <p className="font-bold text-green-300">{money(cashFlow.cashSales)}</p>
+            <p className="mt-1 text-xs text-muted">Entrou pelas vendas</p>
+          </div>
+          <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-3">
+            <p className="text-sm text-muted">Outras entradas</p>
+            <p className="font-bold text-green-300">{money(cashFlow.otherCashIn)}</p>
+            <p className="mt-1 text-xs text-muted">Reforcos e recebimentos</p>
           </div>
           <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-3">
-            <p className="text-sm text-muted">Saiu dinheiro</p>
-            <p className="font-bold text-rose-300">{money(cashOut)}</p>
-            <p className="mt-1 text-xs text-muted">Retiradas/sangrias</p>
+            <p className="text-sm text-muted">Pagamentos e saidas</p>
+            <p className="font-bold text-rose-300">{money(cashFlow.cashOut)}</p>
+            <p className="mt-1 text-xs text-muted">Motoboy, compras e retiradas</p>
           </div>
           <div className="rounded-lg border border-accent/20 bg-accent/5 p-3">
-            <p className="text-sm text-muted">PIX</p>
-            <p className="font-bold text-accent">{money(pixSales)}</p>
-            <p className="mt-1 text-xs text-muted">Fora da gaveta</p>
-          </div>
-          <div className="rounded-lg border border-line bg-panel-strong p-3">
-            <p className="text-sm text-muted">Cartao</p>
-            <p className="font-bold">{money(cardSales)}</p>
-            <p className="mt-1 text-xs text-muted">Credito/debito</p>
+            <p className="text-sm text-muted">Saldo esperado</p>
+            <p className="font-bold text-white">{money(expectedCash)}</p>
+            <p className="mt-1 text-xs text-muted">Dinheiro fisico agora</p>
           </div>
         </div>
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 rounded-lg border border-line bg-background/40 p-3 text-sm">
+          <span>{money(cashFlow.opening)} inicial</span>
+          <span className="text-green-300">+ {money(cashFlow.cashSales)} vendas</span>
+          <span className="text-green-300">+ {money(cashFlow.otherCashIn)} outras entradas</span>
+          <span className="text-rose-200">- {money(cashFlow.cashOut)} pagamentos/saidas</span>
+          <strong>= {money(expectedCash)} esperado</strong>
+        </div>
         <p className="mt-3 text-sm text-muted">
-          Dinheiro vendido {money(cashSales)} + entradas {money(cashIn)} - saidas {money(cashOut)}.
-          Diferenca nos caixas fechados: {money(closedDifference)}.
+          PIX {money(pixSales)} e cartao {money(cardSales)} fazem parte das vendas, mas nao da
+          gaveta. Diferenca nos caixas fechados: {money(closedDifference)}.
         </p>
       </Card>
+
+      <ResetHistoryForm />
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
         <Card>
