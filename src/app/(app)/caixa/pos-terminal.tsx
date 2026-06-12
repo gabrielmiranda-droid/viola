@@ -73,13 +73,6 @@ type CartItem = {
   quantity: number;
 };
 
-type MetricProps = {
-  label: string;
-  value: number;
-  format?: "money" | "number";
-  tone?: "default" | "good" | "bad";
-};
-
 type TerminalDraft = {
   id: string;
   terminalName: string;
@@ -169,25 +162,6 @@ function productCategoryParts(category: string) {
     category: parts[0] || "Sem categoria",
     subcategory: parts.slice(1).join(" / ") || "Geral",
   };
-}
-
-function Metric({ label, value, format = "money", tone = "default" }: MetricProps) {
-  return (
-    <div className="rounded-lg border border-line bg-panel-strong/80 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-      <p className="text-[0.72rem] font-semibold uppercase tracking-[0.08em] text-muted">
-        {label}
-      </p>
-      <p
-        className={cn(
-          "mt-1 text-lg font-black leading-tight",
-          tone === "good" && "text-green-300",
-          tone === "bad" && "text-rose-200",
-        )}
-      >
-        {format === "money" ? money(value) : quantity(value)}
-      </p>
-    </div>
-  );
 }
 
 function FormMessage({ state }: { state: ActionResult }) {
@@ -605,9 +579,20 @@ function CashPanel({
   const registeredCardTotal = creditSales + debitSales + unknownCardSales;
   const cardDifference = machineCardTotal - registeredCardTotal;
   const pixDifference = countedPix - pixSales;
-  const totalExpected = expectedCash + cardSales + pixSales;
-  const totalCounted = countedCash + countedCredit + countedDebit + countedPix;
-  const totalDifference = totalCounted - totalExpected;
+  const cashDifference = countedCash - expectedCash;
+  const hasCashCount = cashAmount.trim() !== "";
+  const hasCardCount =
+    registeredCardTotal <= 0.009 ||
+    terminalRows.some(
+      (row) => row.creditAmount.trim() !== "" || row.debitAmount.trim() !== "",
+    );
+  const hasPixCount =
+    pixSales <= 0.009 ||
+    pixAmount.trim() !== "" ||
+    terminalRows.some((row) => row.pixAmount.trim() !== "");
+  const allClosingValuesEntered = hasCashCount && hasCardCount && hasPixCount;
+  const totalDifference = cashDifference + cardDifference + pixDifference;
+  const cashDayMovement = cashSales + cashIn - cashOut;
 
   function updateTerminalRow(id: string, field: keyof TerminalDraft, value: string) {
     setTerminalRows((current) =>
@@ -892,20 +877,108 @@ function CashPanel({
                   <p className="text-sm text-muted">Depois de fechar, o proximo caixa comeca limpo.</p>
                 </div>
               </div>
-              <Badge variant={Math.abs(totalDifference) > 0.009 ? "warning" : "success"}>
-                Diferenca {money(totalDifference)}
-              </Badge>
+              {allClosingValuesEntered ? (
+                <Badge variant={Math.abs(totalDifference) > 0.009 ? "warning" : "success"}>
+                  Diferenca geral {money(totalDifference)}
+                </Badge>
+              ) : (
+                <Badge variant="neutral">Aguardando conferencia</Badge>
+              )}
             </div>
 
             <input type="hidden" name="credit_amount" value={countedCredit.toFixed(2)} />
             <input type="hidden" name="debit_amount" value={countedDebit.toFixed(2)} />
             <input type="hidden" name="pix_amount" value={countedPix.toFixed(2)} />
 
-            <div className="mb-4 grid gap-2 md:grid-cols-4">
-              <Metric label="Saldo esperado da gaveta" value={expectedCash} />
-              <Metric label="Vendas em dinheiro" value={cashSales} tone="good" />
-              <Metric label="Entradas manuais" value={cashIn} tone="good" />
-              <Metric label="Saidas manuais" value={cashOut} tone="bad" />
+            <div className="mb-4 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+              <div className="rounded-xl border border-accent/25 bg-accent/5 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.1em] text-accent">
+                      Como a gaveta chegou neste valor
+                    </p>
+                    <p className="mt-1 text-sm text-muted">Somente dinheiro fisico</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-muted">Deve ter na gaveta</p>
+                    <p className="mt-1 text-2xl font-black text-white">{money(expectedCash)}</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-2 rounded-lg border border-line bg-background/40 p-3 text-center">
+                  <div>
+                    <p className="text-xs text-muted">Saldo inicial</p>
+                    <strong className="mt-1 block">{money(Number(register.opening_amount))}</strong>
+                    <span className="mt-1 block text-[0.68rem] text-slate-400">
+                      Ja estava no caixa
+                    </span>
+                  </div>
+                  <span className="text-lg text-muted">
+                    {cashDayMovement >= 0 ? "+" : "-"}
+                  </span>
+                  <div>
+                    <p className="text-xs text-muted">Movimento de hoje</p>
+                    <strong
+                      className={cn(
+                        "mt-1 block",
+                        cashDayMovement >= 0 ? "text-green-300" : "text-rose-200",
+                      )}
+                    >
+                      {money(Math.abs(cashDayMovement))}
+                    </strong>
+                    <span className="mt-1 block text-[0.68rem] text-slate-400">
+                      Entradas menos saidas
+                    </span>
+                  </div>
+                  <span className="text-lg text-muted">=</span>
+                  <div>
+                    <p className="text-xs text-muted">Total na gaveta</p>
+                    <strong className="mt-1 block text-lg text-white">{money(expectedCash)}</strong>
+                    <span className="mt-1 block text-[0.68rem] text-slate-400">
+                      Valor esperado
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-3 gap-2 text-center text-sm">
+                  <div className="rounded-lg border border-green-400/15 bg-green-400/5 p-2">
+                    <p className="text-xs text-muted">Vendas em dinheiro</p>
+                    <strong className="mt-1 block text-green-300">+ {money(cashSales)}</strong>
+                  </div>
+                  <div className="rounded-lg border border-green-400/15 bg-green-400/5 p-2">
+                    <p className="text-xs text-muted">Entradas manuais</p>
+                    <strong className="mt-1 block text-green-300">+ {money(cashIn)}</strong>
+                  </div>
+                  <div className="rounded-lg border border-rose-400/15 bg-rose-400/5 p-2">
+                    <p className="text-xs text-muted">Retiradas</p>
+                    <strong className="mt-1 block text-rose-200">- {money(cashOut)}</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-line bg-panel p-4">
+                <p className="text-xs font-black uppercase tracking-[0.1em] text-slate-300">
+                  Vendas realizadas hoje
+                </p>
+                <p className="mt-1 text-3xl font-black">{money(totalSales(registerSales))}</p>
+                <p className="mt-1 text-xs text-muted">
+                  O saldo inicial da gaveta nao faz parte das vendas.
+                </p>
+                <div className="mt-4 space-y-2 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted">Dinheiro</span>
+                    <strong>{money(cashSales)}</strong>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted">PIX</span>
+                    <strong>{money(pixSales)}</strong>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted">Cartao</span>
+                    <strong>{money(cardSales)}</strong>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {Math.abs(cashFormulaDifference) > 0.009 ? (
@@ -914,9 +987,18 @@ function CashPanel({
               </p>
             ) : null}
 
+            <div className="mb-3">
+              <p className="text-xs font-black uppercase tracking-[0.1em] text-accent">
+                Conferencia do operador
+              </p>
+              <p className="mt-1 text-sm text-muted">
+                Conte ou consulte cada valor. A diferenca aparece somente depois de informar.
+              </p>
+            </div>
+
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="cash_amount">Dinheiro fisico</Label>
+              <div className="rounded-xl border border-line bg-panel p-3">
+                <Label htmlFor="cash_amount">Quanto contou em dinheiro na gaveta?</Label>
                 <Input
                   id="cash_amount"
                   name="cash_amount"
@@ -926,20 +1008,54 @@ function CashPanel({
                   placeholder={String(expectedCash)}
                   value={cashAmount}
                   onChange={(event) => setCashAmount(event.target.value)}
+                  className="mt-2"
                   required
                 />
+                <div className="mt-3 flex items-center justify-between gap-3 text-sm">
+                  <span className="text-muted">Esperado</span>
+                  <strong>{money(expectedCash)}</strong>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-3 text-sm">
+                  <span className="text-muted">Diferenca</span>
+                  {hasCashCount ? (
+                    <strong
+                      className={cn(
+                        Math.abs(cashDifference) > 0.009 ? "text-amber-200" : "text-green-300",
+                      )}
+                    >
+                      {money(cashDifference)}
+                    </strong>
+                  ) : (
+                    <span className="text-xs text-muted">Informe o valor</span>
+                  )}
+                </div>
               </div>
               <div className="rounded-lg border border-line bg-panel p-3">
                 <p className="text-[0.72rem] font-semibold uppercase tracking-[0.08em] text-muted">
-                  Cartao pela maquininha
+                  Vendas no cartao
                 </p>
-                <p className="mt-1 text-lg font-black">{money(machineCardTotal)}</p>
+                <p className="mt-1 text-lg font-black">{money(cardSales)} esperado</p>
                 <p className="mt-1 text-xs text-muted">
-                  Preencha credito/debito nas maquininhas abaixo.
+                  Informe credito e debito nas maquininhas abaixo.
                 </p>
+                <div className="mt-3 flex items-center justify-between gap-3 text-sm">
+                  <span className="text-muted">Informado</span>
+                  <strong>{hasCardCount ? money(machineCardTotal) : "--"}</strong>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-3 text-sm">
+                  <span className="text-muted">Diferenca</span>
+                  <strong
+                    className={cn(
+                      hasCardCount &&
+                        (Math.abs(cardDifference) > 0.009 ? "text-amber-200" : "text-green-300"),
+                    )}
+                  >
+                    {hasCardCount ? money(cardDifference) : "--"}
+                  </strong>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="pix_amount_visible">PIX separado/app</Label>
+              <div className="rounded-xl border border-line bg-panel p-3">
+                <Label htmlFor="pix_amount_visible">Total recebido em PIX</Label>
                 <Input
                   id="pix_amount_visible"
                   type="number"
@@ -948,7 +1064,23 @@ function CashPanel({
                   placeholder={String(pixSales)}
                   value={pixAmount}
                   onChange={(event) => setPixAmount(event.target.value)}
+                  className="mt-2"
                 />
+                <div className="mt-3 flex items-center justify-between gap-3 text-sm">
+                  <span className="text-muted">Esperado</span>
+                  <strong>{money(pixSales)}</strong>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-3 text-sm">
+                  <span className="text-muted">Diferenca</span>
+                  <strong
+                    className={cn(
+                      hasPixCount &&
+                        (Math.abs(pixDifference) > 0.009 ? "text-amber-200" : "text-green-300"),
+                    )}
+                  >
+                    {hasPixCount ? money(pixDifference) : "--"}
+                  </strong>
+                </div>
               </div>
             </div>
 
@@ -1027,49 +1159,44 @@ function CashPanel({
               <div className="rounded-lg border border-line bg-panel p-3">
                 <div className="flex items-center gap-2 text-sm font-bold">
                   <Calculator className="h-4 w-4 text-accent" />
-                  Conferencia
+                  Resultado do fechamento
                 </div>
                 <div className="mt-3 space-y-3 text-sm">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-muted">Esperado</span>
-                    <strong>{money(totalExpected)}</strong>
+                    <span className="text-muted">Gaveta esperada</span>
+                    <strong>{money(expectedCash)}</strong>
                   </div>
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-muted">Informado</span>
-                    <strong>{money(totalCounted)}</strong>
+                    <span className="text-muted">Vendas do dia</span>
+                    <strong>{money(totalSales(registerSales))}</strong>
                   </div>
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-muted">Diferenca</span>
-                    <strong className={cn(Math.abs(totalDifference) > 0.009 && "text-amber-200")}>
-                      {money(totalDifference)}
-                    </strong>
+                    <span className="text-muted">Conferencia geral</span>
+                    {allClosingValuesEntered ? (
+                      <strong
+                        className={cn(
+                          Math.abs(totalDifference) > 0.009 ? "text-amber-200" : "text-green-300",
+                        )}
+                      >
+                        {money(totalDifference)}
+                      </strong>
+                    ) : (
+                      <span className="text-xs text-muted">Preencha dinheiro, cartao e PIX</span>
+                    )}
                   </div>
                   <div className="border-t border-line pt-3">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-muted">Cartao maq.</span>
-                      <strong>{money(machineCardTotal)}</strong>
+                      <span className="text-muted">Saldo inicial</span>
+                      <strong>{money(Number(register.opening_amount))}</strong>
                     </div>
                     <div className="mt-2 flex items-center justify-between gap-3">
-                      <span className="text-muted">PIX total</span>
-                      <strong>
-                        {money(countedPix)}
+                      <span className="text-muted">Movimento da gaveta hoje</span>
+                      <strong className={cashDayMovement >= 0 ? "text-green-300" : "text-rose-200"}>
+                        {cashDayMovement >= 0 ? "+" : "-"} {money(Math.abs(cashDayMovement))}
                       </strong>
                     </div>
-                    <p
-                      className={cn(
-                        "mt-2 text-xs text-muted",
-                        Math.abs(cardDifference) > 0.009 && "text-amber-200",
-                      )}
-                    >
-                      {money(cardDifference)} contra cartoes registrados.
-                    </p>
-                    <p
-                      className={cn(
-                        "mt-1 text-xs text-muted",
-                        Math.abs(pixDifference) > 0.009 && "text-amber-200",
-                      )}
-                    >
-                      {money(pixDifference)} contra PIX registrado.
+                    <p className="mt-3 text-xs text-muted">
+                      O dinheiro inicial permanece na gaveta, mas nao entra no total vendido.
                     </p>
                   </div>
                 </div>
@@ -1085,10 +1212,21 @@ function CashPanel({
                   placeholder="Divergencias, comprovantes, sangrias..."
                 />
               </div>
-              <Button type="submit" variant="secondary" className="self-end" disabled={closing}>
+              <Button
+                type="submit"
+                variant="secondary"
+                className="self-end"
+                disabled={closing || !allClosingValuesEntered}
+              >
                 {closing ? "Salvando..." : "Fechar e salvar"}
               </Button>
             </div>
+            {!allClosingValuesEntered ? (
+              <p className="mt-3 text-sm text-amber-200">
+                Informe a contagem da gaveta e confira os meios de pagamento usados hoje para
+                liberar o fechamento.
+              </p>
+            ) : null}
             <FormMessage state={closeState} />
           </form>
         </div>
