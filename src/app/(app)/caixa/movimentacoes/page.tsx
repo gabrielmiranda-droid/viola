@@ -18,7 +18,7 @@ import type {
   RegisterSale,
   RegisterSaleItem,
 } from "@/lib/types";
-import { PosTerminal } from "./pos-terminal";
+import { PosTerminal } from "../pos-terminal";
 
 type CashMovementAuditRow = {
   id: string;
@@ -173,7 +173,7 @@ function cashMovementFromAudit(row: CashMovementAuditRow, cashRegisterId: string
   };
 }
 
-export default async function CashierPage() {
+export default async function CashMovimentacoesPage() {
   const profile = await requireRole(["admin", "caixa"]);
   const supabase = await createClient();
   const today = todayRange();
@@ -247,8 +247,8 @@ export default async function CashierPage() {
     <Panel>
       <SectionHeader
         eyebrow="Caixa"
-        title="Gestao de Caixa"
-        description="Abra o caixa, movimente a gaveta e feche ao final da operacao."
+        title="Movimentacoes"
+        description="Registre entradas e saidas manuais de dinheiro da gaveta."
       />
       <PosTerminal
         userId={profile.id}
@@ -260,6 +260,7 @@ export default async function CashierPage() {
         reportHref={reportHref}
         canViewReports={profile.role === "admin"}
         view="cash"
+        initialTab="movimentacao"
       />
     </Panel>
   );

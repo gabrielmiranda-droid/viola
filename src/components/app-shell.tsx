@@ -3,26 +3,77 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  ArrowLeftRight,
+  Banknote,
   BarChart3,
   Boxes,
+  ChefHat,
+  ClipboardCheck,
   ClipboardList,
+  Clock3,
   LogOut,
   Menu,
   ShoppingCart,
-  Store,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import type { Profile } from "@/lib/types";
 
-const nav = [
-  { href: "/caixa", label: "Caixa do dia", icon: ShoppingCart, roles: ["admin", "caixa"] },
-  { href: "/admin", label: "Resumo de hoje", icon: ClipboardList, roles: ["admin"] },
-  { href: "/estoque", label: "Estoque", icon: Boxes, roles: ["admin"] },
-  { href: "/relatorios", label: "Historico", icon: BarChart3, roles: ["admin"] },
+type NavItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  roles: string[];
+};
+
+type NavGroup = {
+  label: string;
+  items: NavItem[];
+};
+
+const navGroups: NavGroup[] = [
+  {
+    label: "Operacao",
+    items: [
+      { href: "/operacao", label: "Caixa do Dia", icon: ShoppingCart, roles: ["admin", "caixa"] },
+      { href: "/operacao/pedidos", label: "Pedidos", icon: ClipboardList, roles: ["admin", "caixa"] },
+      { href: "/operacao/cozinha", label: "Cozinha", icon: ChefHat, roles: ["admin", "caixa"] },
+    ],
+  },
+  {
+    label: "Caixa",
+    items: [
+      { href: "/caixa", label: "Abrir Caixa", icon: Banknote, roles: ["admin", "caixa"] },
+      { href: "/caixa/movimentacoes", label: "Movimentacoes", icon: ArrowLeftRight, roles: ["admin", "caixa"] },
+      { href: "/caixa/fechamento", label: "Fechamento", icon: ClipboardCheck, roles: ["admin", "caixa"] },
+    ],
+  },
+  {
+    label: "Gestao",
+    items: [
+      { href: "/admin", label: "Resumo de hoje", icon: BarChart3, roles: ["admin"] },
+      { href: "/estoque", label: "Estoque", icon: Boxes, roles: ["admin"] },
+      { href: "/relatorios", label: "Historico", icon: Clock3, roles: ["admin"] },
+    ],
+  },
 ];
+
+function isItemActive(href: string, pathname: string): boolean {
+  return pathname === href || pathname.startsWith(href + "/");
+}
+
+function getActiveItem(profile: Profile, pathname: string): NavItem | undefined {
+  for (const group of navGroups) {
+    for (const item of group.items) {
+      if (!item.roles.includes(profile.role)) continue;
+      if (isItemActive(item.href, pathname)) return item;
+    }
+  }
+  return undefined;
+}
 
 function getInitials(name: string) {
   const parts = name.trim().split(/\s+/);
@@ -33,32 +84,43 @@ function getInitials(name: string) {
 
 function NavLinks({ profile, onNavigate }: { profile: Profile; onNavigate?: () => void }) {
   const pathname = usePathname();
-  const visible = nav.filter((item) => item.roles.includes(profile.role));
 
   return (
     <nav className="flex flex-col gap-1">
-      {visible.map((item) => {
-        const active = pathname.startsWith(item.href);
-        const Icon = item.icon;
+      {navGroups.map((group) => {
+        const visibleItems = group.items.filter((item) => item.roles.includes(profile.role));
+        if (!visibleItems.length) return null;
 
         return (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={onNavigate}
-            className={cn(
-              "group flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold transition duration-200",
-              active
-                ? "bg-accent/10 text-accent ring-1 ring-accent/20"
-                : "text-slate-400 hover:bg-white/5 hover:text-foreground",
-            )}
-          >
-            <Icon
-              className={cn("h-5 w-5 shrink-0", active ? "text-accent" : "text-slate-500 group-hover:text-foreground")}
-              strokeWidth={active ? 2.4 : 2.1}
-            />
-            {item.label}
-          </Link>
+          <div key={group.label}>
+            <p className="px-3 pt-3 pb-1 text-[0.65rem] font-bold uppercase tracking-[0.14em] text-muted/60">
+              {group.label}
+            </p>
+            {visibleItems.map((item) => {
+              const active = isItemActive(item.href, pathname);
+              const Icon = item.icon;
+
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={onNavigate}
+                  className={cn(
+                    "group flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold transition duration-200",
+                    active
+                      ? "bg-accent/10 text-accent ring-1 ring-accent/20"
+                      : "text-slate-400 hover:bg-white/5 hover:text-foreground",
+                  )}
+                >
+                  <Icon
+                    className={cn("h-5 w-5 shrink-0", active ? "text-accent" : "text-slate-500 group-hover:text-foreground")}
+                    strokeWidth={active ? 2.4 : 2.1}
+                  />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
         );
       })}
     </nav>
@@ -79,8 +141,7 @@ function LogoutForm() {
 function MobileHeader({ profile }: { profile: Profile }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
-  const visible = nav.filter((item) => item.roles.includes(profile.role));
-  const currentPage = visible.find((item) => pathname.startsWith(item.href));
+  const currentPage = getActiveItem(profile, pathname);
 
   useEffect(() => {
     if (!open) return;
