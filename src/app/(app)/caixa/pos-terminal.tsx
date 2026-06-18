@@ -301,19 +301,16 @@ function CashSubTabs({
   onChange,
   cartQuantity,
   salesCount,
-  tabs,
 }: {
   activeTab: CashTab;
   onChange: (tab: CashTab) => void;
   cartQuantity: number;
   salesCount: number;
-  tabs?: typeof cashTabs;
 }) {
-  const activeTabs = tabs ?? cashTabs;
   return (
     <Card className="p-2">
-      <div className={`grid gap-2 ${activeTabs.length === 2 ? "grid-cols-2" : "md:grid-cols-3"}`} role="tablist" aria-label="Passos do caixa">
-        {activeTabs.map((tab) => {
+      <div className="grid gap-2 md:grid-cols-3" role="tablist" aria-label="Passos do caixa">
+        {cashTabs.map((tab) => {
           const Icon = tab.icon;
           const active = activeTab === tab.value;
           const helper =
@@ -1372,8 +1369,6 @@ export function PosTerminal({
   cashMovements,
   reportHref,
   canViewReports,
-  view,
-  initialTab,
 }: {
   userId: string;
   products: Product[];
@@ -1383,8 +1378,6 @@ export function PosTerminal({
   cashMovements: CashMovement[];
   reportHref: string;
   canViewReports: boolean;
-  view?: "sell" | "cash" | "full";
-  initialTab?: CashTab;
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -1398,9 +1391,7 @@ export function PosTerminal({
   const [category, setCategory] = useState("Todos");
   const [subcategory, setSubcategory] = useState("Todas");
   const [search, setSearch] = useState("");
-  const [cashTab, setCashTab] = useState<CashTab>(
-    initialTab ?? (view === "cash" ? "movimentacao" : "vendas")
-  );
+  const [cashTab, setCashTab] = useState<CashTab>("vendas");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("pix");
   const [cardType, setCardType] = useState<CardType>("credito");
   const [cardMachine, setCardMachine] = useState("Principal");
@@ -1838,7 +1829,7 @@ export function PosTerminal({
 
   return (
     <div className="space-y-5">
-      {view !== "sell" && liveRegister ? (
+      {liveRegister ? (
         <>
           <CashRegisterSummary
             register={liveRegister}
@@ -1853,12 +1844,11 @@ export function PosTerminal({
             onChange={setCashTab}
             cartQuantity={cartQuantity}
             salesCount={completedSalesCount}
-            tabs={view === "cash" ? cashTabs.filter((t) => t.value !== "vendas") : undefined}
           />
         </>
       ) : null}
 
-      {view !== "sell" && (!liveRegister || activeCashTab !== "vendas") ? (
+      {!liveRegister || activeCashTab !== "vendas" ? (
         <CashPanel
           activeTab={activeCashTab}
           register={liveRegister}
@@ -1870,19 +1860,10 @@ export function PosTerminal({
         />
       ) : null}
 
-      {view === "sell" && !liveRegister ? (
-        <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-4 text-amber-100">
-          <p className="font-black">Caixa fechado</p>
-          <p className="mt-1 text-sm">
-            Acesse <strong>Caixa &rarr; Abrir Caixa</strong> no menu para iniciar a operacao.
-          </p>
-        </div>
-      ) : null}
-
-      {view !== "cash" && activeCashTab === "vendas" && (view !== "sell" || liveRegister) ? (
+      {activeCashTab === "vendas" ? (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_430px]">
         <section className="min-w-0 space-y-3">
-          {!liveRegister && view !== "sell" ? (
+          {!liveRegister ? (
             <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-4 text-amber-100">
               <p className="font-black">Caixa fechado</p>
               <p className="mt-1 text-sm">

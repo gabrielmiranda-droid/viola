@@ -247,8 +247,8 @@ export default async function CashierPage() {
     <Panel>
       <SectionHeader
         eyebrow="Caixa"
-        title="Gestao de Caixa"
-        description="Abra o caixa, movimente a gaveta e feche ao final da operacao."
+        title="Caixa do dia"
+        description="Tudo aqui pertence ao caixa aberto agora. Fechou, ficou salvo; abriu outro, comeca limpo."
       />
       <PosTerminal
         userId={profile.id}
@@ -259,7 +259,6 @@ export default async function CashierPage() {
         cashMovements={cashMovements}
         reportHref={reportHref}
         canViewReports={profile.role === "admin"}
-        view="cash"
       />
     </Panel>
   );
