@@ -2026,7 +2026,7 @@ export function PosTerminal({
               </div>
             </div>
 
-            <div className="max-h-[48vh] overflow-y-auto p-4">
+            <div className="max-h-[48vh] overflow-y-auto overscroll-contain snap-y snap-mandatory p-4">
               {cart.length === 0 ? (
                 <EmptyState>Toque nos produtos para vender.</EmptyState>
               ) : (
@@ -2038,7 +2038,7 @@ export function PosTerminal({
                         initial={{ opacity: 0, y: 8 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, x: 24 }}
-                        className="rounded-lg border border-line bg-panel-strong p-3"
+                        className="snap-start rounded-lg border border-line bg-panel-strong p-3"
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
