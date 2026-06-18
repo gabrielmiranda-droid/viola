@@ -9,11 +9,11 @@ import { cn } from "@/lib/cn";
 
 const variants = {
   primary:
-    "bg-accent text-white shadow-[0_10px_24px_rgba(47,125,244,0.22)] hover:bg-blue-400 focus-visible:outline-accent",
+    "bg-accent text-[#0A0A0A] font-bold shadow-[0_10px_24px_rgba(212,175,55,0.25)] hover:bg-accent-hover focus-visible:outline-accent",
   success:
-    "bg-accent-2 text-black shadow-[0_10px_24px_rgba(67,209,124,0.16)] hover:bg-green-300 focus-visible:outline-accent-2",
+    "bg-accent-2 text-black shadow-[0_10px_24px_rgba(34,197,94,0.16)] hover:bg-green-300 focus-visible:outline-accent-2",
   secondary:
-    "border border-line bg-panel-strong text-foreground hover:border-accent/45 hover:bg-[#1c222c] focus-visible:outline-accent",
+    "border border-line bg-panel-strong text-foreground hover:border-accent/45 hover:bg-[#222222] focus-visible:outline-accent",
   danger:
     "bg-danger text-white shadow-[0_10px_24px_rgba(240,82,82,0.16)] hover:bg-red-400 focus-visible:outline-danger",
   warning:

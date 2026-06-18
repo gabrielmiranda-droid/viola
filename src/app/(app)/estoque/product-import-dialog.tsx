@@ -333,7 +333,7 @@ function PreviewRow({
       <td className="whitespace-nowrap px-3 py-2">{money(product.sale_price)}</td>
       <td className="px-3 py-2">
         {product.status === "existing" ? (
-          <span className="inline-flex items-center gap-1 text-blue-200">
+          <span className="inline-flex items-center gap-1 text-accent">
             <CheckCircle2 className="h-4 w-4" />
             {replaceExisting ? "Preco sera atualizado" : "Ja cadastrado"}
           </span>

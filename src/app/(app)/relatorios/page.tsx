@@ -556,7 +556,7 @@ export default async function ReportsPage({
             <Banknote className="h-5 w-5 text-green-300" />
           </div>
         </Card>
-        <Card className="border-blue-400/25 bg-blue-400/5">
+        <Card className="border-accent/25 bg-accent/5">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-sm text-muted">PIX e cartao</p>
@@ -565,7 +565,7 @@ export default async function ReportsPage({
                 Faz parte das vendas, fora da gaveta
               </p>
             </div>
-            <CreditCard className="h-5 w-5 text-blue-300" />
+            <CreditCard className="h-5 w-5 text-accent" />
           </div>
         </Card>
         <Card

@@ -172,7 +172,7 @@ function CategoryRail({
           className={cn(
             "min-h-10 shrink-0 rounded-lg border px-3 text-sm font-semibold transition",
             activeCategory === item.name
-              ? "border-accent bg-accent text-white shadow-[0_10px_24px_rgba(47,125,244,0.2)]"
+              ? "border-accent bg-accent text-[#0A0A0A] shadow-[0_10px_24px_rgba(212,175,55,0.2)]"
               : "border-line bg-panel-strong text-slate-300 hover:border-accent/35 hover:bg-white/6",
           )}
         >

@@ -19,7 +19,7 @@ export function PrintTestForm() {
     <form action={action} className="mt-4 rounded-xl border border-accent/25 bg-accent/5 p-4">
       <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
         <div>
-          <h3 className="font-black text-blue-100">Impressao de teste</h3>
+          <h3 className="font-black text-accent">Impressao de teste</h3>
           <p className="mt-1 text-sm text-muted">
             Cria um print_job pendente sem finalizar venda. Use com o printer-service
             em modo mock para gerar os arquivos TXT.

@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 const toneStyles = {
   default: {
     border: "border-t-accent/60",
-    icon: "border-accent/20 bg-accent/10 text-accent shadow-[0_0_18px_rgba(47,125,244,0.22)]",
+    icon: "border-accent/20 bg-accent/10 text-accent shadow-[0_0_18px_rgba(212,175,55,0.22)]",
   },
   success: {
     border: "border-t-green-400/60",

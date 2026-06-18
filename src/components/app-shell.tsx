@@ -132,7 +132,7 @@ function MobileHeader({ profile }: { profile: Profile }) {
           }}
         >
           <div
-            className="h-full w-80 max-w-[86vw] border-r border-line bg-[#0a0c10] p-4"
+            className="h-full w-80 max-w-[86vw] border-r border-line bg-[#0A0A0A] p-4"
             role="dialog"
             aria-modal="true"
             aria-label="Menu principal"
@@ -175,7 +175,7 @@ export function AppShell({
 }) {
   return (
     <div className="min-h-screen bg-transparent">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[184px] border-r border-line bg-[#0a0c10]/95 p-2 lg:flex lg:flex-col xl:w-[236px] xl:p-3">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[184px] border-r border-line bg-[#0A0A0A]/95 p-2 lg:flex lg:flex-col xl:w-[236px] xl:p-3">
         <div className="mb-5 flex items-center gap-2 rounded-lg border border-line bg-panel p-2 xl:gap-3 xl:p-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg xl:h-10 xl:w-10">
             <Image src="/logo.png" alt="NELORE'S BURGUER" width={40} height={40} className="h-full w-full object-contain" />

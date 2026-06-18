@@ -273,7 +273,7 @@ function CategoryRail({
             className={cn(
               "min-h-11 min-w-0 truncate rounded-lg border px-3 text-sm font-bold transition duration-200",
               activeCategory === item.name
-                ? "border-accent bg-accent text-white shadow-[0_12px_30px_rgba(47,125,244,0.22)]"
+                ? "border-accent bg-accent text-[#0A0A0A] shadow-[0_12px_30px_rgba(212,175,55,0.22)]"
                 : "border-line bg-panel-strong/90 text-slate-300 hover:border-accent/35 hover:bg-white/6",
             )}
             title={`${item.name} (${item.count})`}
@@ -330,21 +330,21 @@ function CashSubTabs({
               className={cn(
                 "flex min-h-16 items-center gap-3 rounded-lg border px-3 text-left transition duration-200",
                 active
-                  ? "border-accent bg-accent text-white shadow-[0_12px_30px_rgba(47,125,244,0.2)]"
+                  ? "border-accent bg-accent text-[#0A0A0A] shadow-[0_12px_30px_rgba(212,175,55,0.2)]"
                   : "border-line bg-panel-strong text-slate-300 hover:border-accent/35 hover:bg-white/6",
               )}
             >
               <span
                 className={cn(
                   "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border",
-                  active ? "border-white/25 bg-white/10" : "border-line bg-background/45",
+                  active ? "border-[#0A0A0A]/25 bg-[#0A0A0A]/10" : "border-line bg-background/45",
                 )}
               >
                 <Icon className="h-5 w-5" />
               </span>
               <span className="min-w-0">
                 <span className="block font-black leading-tight">{tab.label}</span>
-                <span className={cn("mt-1 block text-xs", active ? "text-blue-100" : "text-muted")}>
+                <span className={cn("mt-1 block text-xs", active ? "text-[#0A0A0A]/70" : "text-muted")}>
                   {helper}
                 </span>
               </span>
@@ -2146,7 +2146,7 @@ export function PosTerminal({
                       )}
                     >
                       <span className="block text-sm font-black">{option.label}</span>
-                      <span className={cn("mt-1 block text-xs", active ? "text-blue-100" : "text-muted")}>
+                      <span className={cn("mt-1 block text-xs", active ? "text-[#0A0A0A]/70" : "text-muted")}>
                         {option.description}
                       </span>
                     </button>

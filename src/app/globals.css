@@ -1,16 +1,18 @@
 @import "tailwindcss";
 
 :root {
-  --background: #090a0c;
-  --foreground: #f5f7fb;
-  --panel: #111318;
-  --panel-strong: #171a21;
-  --muted: #9aa4b2;
-  --line: #252b35;
-  --accent: #2f7df4;
-  --accent-2: #43d17c;
-  --danger: #f05252;
-  --warning: #f5a524;
+  --background: #0A0A0A;
+  --foreground: #F5F5F5;
+  --panel: #141414;
+  --panel-strong: #1B1B1B;
+  --muted: #A1A1AA;
+  --line: #2A2A2A;
+  --accent: #D4AF37;
+  --accent-hover: #F0C75E;
+  --accent-dark: #B8860B;
+  --accent-2: #22C55E;
+  --danger: #EF4444;
+  --warning: #F59E0B;
 }
 
 @theme inline {
@@ -21,6 +23,8 @@
   --color-muted: var(--muted);
   --color-line: var(--line);
   --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-dark: var(--accent-dark);
   --color-accent-2: var(--accent-2);
   --color-danger: var(--danger);
   --color-warning: var(--warning);
@@ -31,8 +35,8 @@
 body {
   min-height: 100vh;
   background:
-    linear-gradient(180deg, #0d0f13 0%, #090a0c 28rem),
-    #090a0c;
+    linear-gradient(180deg, #111111 0%, #0A0A0A 28rem),
+    #0A0A0A;
   color: var(--foreground);
   font-family: var(--font-sans);
 }
@@ -53,11 +57,11 @@ button:disabled {
 }
 
 ::selection {
-  background: rgba(47, 125, 244, 0.35);
+  background: rgba(212, 175, 55, 0.35);
 }
 
 * {
-  scrollbar-color: #2b3340 transparent;
+  scrollbar-color: #3a3a3a transparent;
 }
 
 ::-webkit-scrollbar {
@@ -72,7 +76,7 @@ button:disabled {
 ::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 999px;
-  background: #2b3340;
+  background: #3a3a3a;
   background-clip: content-box;
 }
 
