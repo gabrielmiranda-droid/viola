@@ -26,6 +26,7 @@ import {
   TrendingUp,
   Users,
 } from "lucide-react";
+import { PrintTestForm } from "./print-test-form";
 import { ResetHistoryForm } from "./reset-history-form";
 
 export const dynamic = "force-dynamic";
@@ -482,6 +483,7 @@ export default async function AdminDashboardPage() {
         ) : null}
       </Card>
 
+      <PrintTestForm />
       <ResetHistoryForm />
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">

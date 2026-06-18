@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Viola PDV",
+  title: "NELORE'S BURGUER",
   description: "Sistema local de caixa, estoque e historico para trailer e lanchonete.",
 };
 

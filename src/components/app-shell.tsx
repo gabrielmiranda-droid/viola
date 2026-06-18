@@ -12,6 +12,7 @@ import {
   Store,
   X,
 } from "lucide-react";
+import Image from "next/image";
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import type { Profile } from "@/lib/types";
@@ -108,8 +109,8 @@ function MobileHeader({ profile }: { profile: Profile }) {
             </>
           ) : (
             <>
-              <Store className="h-4 w-4 text-accent" />
-              <span className="text-sm font-bold">Viola PDV</span>
+              <Image src="/logo.png" alt="NELORE'S BURGUER" width={20} height={20} className="h-5 w-5 object-contain" />
+              <span className="text-sm font-bold">NELORE&apos;S BURGUER</span>
             </>
           )}
         </div>
@@ -174,14 +175,14 @@ export function AppShell({
 }) {
   return (
     <div className="min-h-screen bg-transparent">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[236px] border-r border-line bg-[#0a0c10]/95 p-3 lg:flex lg:flex-col">
-        <div className="mb-5 flex items-center gap-3 rounded-lg border border-line bg-panel p-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent text-white shadow-[0_12px_24px_rgba(47,125,244,0.22)]">
-            <Store className="h-6 w-6" />
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[184px] border-r border-line bg-[#0a0c10]/95 p-2 lg:flex lg:flex-col xl:w-[236px] xl:p-3">
+        <div className="mb-5 flex items-center gap-2 rounded-lg border border-line bg-panel p-2 xl:gap-3 xl:p-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg xl:h-10 xl:w-10">
+            <Image src="/logo.png" alt="NELORE'S BURGUER" width={40} height={40} className="h-full w-full object-contain" />
           </div>
-          <div>
-            <p className="font-black">Viola PDV</p>
-            <p className="text-xs text-muted">Operacao comercial</p>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-black xl:text-base">NELORE&apos;S BURGUER</p>
+            <p className="hidden text-xs text-muted xl:block">Operacao comercial</p>
           </div>
         </div>
 
@@ -205,7 +206,7 @@ export function AppShell({
 
       <MobileHeader profile={profile} />
 
-      <main className="lg:pl-[236px]">{children}</main>
+      <main className="lg:pl-[184px] xl:pl-[236px]">{children}</main>
     </div>
   );
 }

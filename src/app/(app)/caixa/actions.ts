@@ -4,20 +4,31 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import type { ActionResult, CardType, PaymentMethod, PreparationStatus, TerminalClosing } from "@/lib/types";
+import type { ActionResult, CardType, OrderType, PaymentMethod, PreparationStatus, TerminalClosing } from "@/lib/types";
 
-const paymentMethods = ["pix", "dinheiro", "cartao"] as const;
+const paymentMethods = ["pix", "dinheiro", "cartao", "cartao_alimentacao", "cartao_refeicao"] as const;
 
 const saleSchema = z.object({
   cashRegisterId: z.string().uuid(),
   paymentMethod: z.enum(paymentMethods),
   cardType: z.enum(["credito", "debito"]).nullable().optional(),
   cardMachine: z.string().trim().max(80).nullable().optional(),
+  orderType: z.enum(["retirada", "local", "entrega"]).default("retirada"),
+  customerName: z.string().trim().max(120).optional(),
+  customerPhone: z.string().trim().max(40).optional(),
+  deliveryAddress: z.string().trim().max(220).optional(),
+  deliveryNeighborhood: z.string().trim().max(120).optional(),
+  deliveryReference: z.string().trim().max(160).optional(),
+  deliveryFee: z.number().min(0).default(0),
+  deliveryDriver: z.string().trim().max(120).optional(),
+  orderNotes: z.string().trim().max(600).optional(),
   items: z
     .array(
       z.object({
         productId: z.string().uuid(),
         quantity: z.number().positive(),
+        modifiers: z.array(z.string().trim().max(80)).default([]),
+        notes: z.string().trim().max(240).nullable().optional(),
       }),
     )
     .min(1),
@@ -27,6 +38,14 @@ const saleSchema = z.object({
       code: "custom",
       path: ["cardType"],
       message: "Informe credito ou debito para venda no cartao.",
+    });
+  }
+
+  if (data.orderType === "entrega" && !data.deliveryDriver?.trim()) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["deliveryDriver"],
+      message: "Informe o motoboy da entrega.",
     });
   }
 });
@@ -65,6 +84,120 @@ function isMissingRpc(
     || message.includes(`public.${rpcName}`)
     || message.includes(rpcName)
   );
+}
+
+function paymentLabel(paymentMethod: PaymentMethod, cardType?: CardType | null) {
+  const labels: Record<PaymentMethod, string> = {
+    pix: "PIX",
+    dinheiro: "Dinheiro",
+    cartao: cardType === "debito" ? "Cartao debito" : "Cartao credito",
+    cartao_alimentacao: "Cartao alimentacao",
+    cartao_refeicao: "Cartao refeicao",
+  };
+
+  return labels[paymentMethod];
+}
+
+async function createSalePrintJob(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  saleId: string,
+  createdBy: string,
+) {
+  const saleResult = await supabase
+    .from("sales")
+    .select([
+      "id",
+      "total_amount",
+      "payment_method",
+      "card_type",
+      "card_machine",
+      "customer_name",
+      "customer_phone",
+      "delivery_address",
+      "delivery_neighborhood",
+      "delivery_reference",
+      "order_notes",
+      "order_type",
+      "delivery_fee",
+      "delivery_driver",
+      "created_at",
+    ].join(","))
+    .eq("id", saleId)
+    .single<{
+      id: string;
+      total_amount: number;
+      payment_method: PaymentMethod;
+      card_type: CardType | null;
+      card_machine: string | null;
+      customer_name: string | null;
+      customer_phone: string | null;
+      delivery_address: string | null;
+      delivery_neighborhood: string | null;
+      delivery_reference: string | null;
+      order_notes: string | null;
+      order_type: OrderType | null;
+      delivery_fee: number | null;
+      delivery_driver: string | null;
+      created_at: string;
+    }>();
+
+  if (saleResult.error || !saleResult.data) {
+    return saleResult.error?.message ?? "Venda nao encontrada para impressao.";
+  }
+
+  const itemsResult = await supabase
+    .from("sale_items")
+    .select("product_name_snapshot,quantity,modifiers,item_notes,total_price")
+    .eq("sale_id", saleId)
+    .order("created_at")
+    .returns<Array<{
+      product_name_snapshot: string;
+      quantity: number;
+      modifiers: string[] | null;
+      item_notes: string | null;
+      total_price: number;
+    }>>();
+
+  if (itemsResult.error) {
+    return itemsResult.error.message;
+  }
+
+  const sale = saleResult.data;
+  const shortId = saleId.slice(0, 8).toUpperCase();
+  const orderNumber = shortId;
+
+  const { error } = await supabase.from("print_jobs").insert({
+    order_number: orderNumber,
+    created_by: createdBy,
+    order_payload: {
+      number: orderNumber,
+      sale_id: saleId,
+      created_at: sale.created_at,
+      customer_name: sale.customer_name ?? "",
+      customer_phone: sale.customer_phone ?? "",
+      delivery_address: sale.delivery_address ?? "",
+      delivery_neighborhood: sale.delivery_neighborhood ?? "",
+      delivery_reference: sale.delivery_reference ?? "",
+      order_type: sale.order_type ?? "retirada",
+      delivery_fee: Number(sale.delivery_fee ?? 0),
+      delivery_driver: sale.delivery_driver ?? "",
+      observation: sale.order_notes ?? "",
+      payment_method: paymentLabel(sale.payment_method, sale.card_type),
+      card_machine: sale.card_machine ?? "",
+      total: Number(sale.total_amount ?? 0),
+      items: (itemsResult.data ?? []).map((item) => ({
+        name: item.product_name_snapshot,
+        quantity: Number(item.quantity),
+        modifiers: Array.isArray(item.modifiers) ? item.modifiers : [],
+        observation: item.item_notes ?? "",
+        total: Number(item.total_price ?? 0),
+      })),
+    },
+    status: "pending",
+    logs: ["Pedido criado ao finalizar venda."],
+  });
+
+  return error?.message ?? null;
 }
 
 function isMissingSaleDetailSupport(error: { message?: string; code?: string } | null) {
@@ -402,7 +535,21 @@ export async function finalizeSaleAction(input: {
   paymentMethod: PaymentMethod;
   cardType?: CardType | null;
   cardMachine?: string | null;
-  items: Array<{ productId: string; quantity: number }>;
+  orderType?: OrderType;
+  customerName?: string;
+  customerPhone?: string;
+  deliveryAddress?: string;
+  deliveryNeighborhood?: string;
+  deliveryReference?: string;
+  deliveryFee?: number;
+  deliveryDriver?: string;
+  orderNotes?: string;
+  items: Array<{
+    productId: string;
+    quantity: number;
+    modifiers?: string[];
+    notes?: string | null;
+  }>;
 }): Promise<ActionResult<{ saleId: string }>> {
   const profile = await requireRole(["admin", "caixa"]);
   const parsed = saleSchema.safeParse(input);
@@ -423,9 +570,22 @@ export async function finalizeSaleAction(input: {
       parsed.data.paymentMethod === "cartao"
         ? parsed.data.cardMachine?.trim() || "Principal"
         : parsed.data.cardMachine?.trim() || null,
+    p_customer_name: parsed.data.customerName?.trim() || null,
+    p_customer_phone: parsed.data.customerPhone?.trim() || null,
+    p_delivery_address: parsed.data.deliveryAddress?.trim() || null,
+    p_delivery_neighborhood: parsed.data.deliveryNeighborhood?.trim() || null,
+    p_delivery_reference: parsed.data.deliveryReference?.trim() || null,
+    p_order_notes: parsed.data.orderNotes?.trim() || null,
+    p_order_type: parsed.data.orderType,
+    p_delivery_fee: parsed.data.orderType === "entrega" ? parsed.data.deliveryFee : 0,
+    p_delivery_driver: parsed.data.orderType === "entrega"
+      ? parsed.data.deliveryDriver?.trim() || null
+      : null,
     p_items: parsed.data.items.map((item) => ({
       product_id: item.productId,
       quantity: item.quantity,
+      modifiers: item.modifiers ?? [],
+      item_notes: item.notes?.trim() || null,
     })),
   });
 
@@ -459,6 +619,8 @@ export async function finalizeSaleAction(input: {
 
         await reconcileRegisterExpectedAmount(supabase, parsed.data.cashRegisterId);
 
+        const printError = await createSalePrintJob(supabase, saleId, profile.id);
+
         revalidatePath("/caixa");
         revalidatePath("/admin");
         revalidatePath("/estoque");
@@ -466,7 +628,9 @@ export async function finalizeSaleAction(input: {
 
         return {
           ok: true,
-          message: parsed.data.paymentMethod === "cartao"
+          message: printError
+            ? `Venda finalizada, mas a impressao nao foi enviada: ${printError}`
+            : parsed.data.paymentMethod === "cartao"
             ? "Venda finalizada. Os detalhes do cartao foram salvos no historico."
             : "Venda finalizada.",
           data: { saleId },
@@ -486,6 +650,8 @@ export async function finalizeSaleAction(input: {
   }
 
   await reconcileRegisterExpectedAmount(supabase, parsed.data.cashRegisterId);
+  const saleId = String(result.data);
+  const printError = await createSalePrintJob(supabase, saleId, profile.id);
 
   revalidatePath("/caixa");
   revalidatePath("/admin");
@@ -494,8 +660,10 @@ export async function finalizeSaleAction(input: {
 
   return {
     ok: true,
-    message: "Venda finalizada.",
-    data: { saleId: String(result.data) },
+    message: printError
+      ? `Venda finalizada, mas a impressao nao foi enviada: ${printError}`
+      : "Venda finalizada e enviada para impressao.",
+    data: { saleId },
   };
 }
 

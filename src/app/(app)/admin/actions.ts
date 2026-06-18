@@ -60,3 +60,54 @@ export async function resetOperationalHistoryAction(
     message: "Nova simulacao iniciada. O historico anterior foi arquivado.",
   };
 }
+
+export async function createTestPrintJobAction(
+  _state: ActionResult<{ jobId: string }>,
+): Promise<ActionResult<{ jobId: string }>> {
+  void _state;
+  const profile = await requireAdmin();
+  const supabase = await createClient();
+  const orderNumber = "001";
+  const orderPayload = {
+    number: orderNumber,
+    customer_name: "Gabriel",
+    items: [
+      {
+        quantity: 2,
+        name: "X Burguer",
+        modifiers: ["Bacon", "Ovo"],
+      },
+    ],
+    observation: "Sem cebola",
+    total: 48,
+  };
+
+  const { data, error } = await supabase
+    .from("print_jobs")
+    .insert({
+      order_number: orderNumber,
+      order_payload: orderPayload,
+      status: "pending",
+      created_by: profile.id,
+      logs: ["Pedido teste criado pelo painel admin."],
+    })
+    .select("id")
+    .single<{ id: string }>();
+
+  if (error) {
+    return {
+      ok: false,
+      message: error.message.includes("print_jobs")
+        ? "Tabela print_jobs nao encontrada. Execute supabase/print-jobs-migration.sql."
+        : error.message,
+    };
+  }
+
+  revalidatePath("/admin");
+
+  return {
+    ok: true,
+    message: `Pedido teste ${orderNumber} enviado para a fila de impressao.`,
+    data: { jobId: data.id },
+  };
+}

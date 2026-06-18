@@ -36,24 +36,10 @@ create trigger prevent_duplicate_product
 before insert or update of name, category on public.products
 for each row execute function public.prevent_duplicate_product();
 
-do $$
-begin
-  if not exists (
-    select 1
-    from public.products
-    group by
-      lower(unaccent(regexp_replace(trim(name), '\s+', ' ', 'g'))),
-      lower(unaccent(regexp_replace(trim(category), '\s+', ' ', 'g')))
-    having count(*) > 1
-  ) then
-    create unique index if not exists idx_products_unique_normalized_name_category
-      on public.products (
-        lower(unaccent(regexp_replace(trim(name), '\s+', ' ', 'g'))),
-        lower(unaccent(regexp_replace(trim(category), '\s+', ' ', 'g')))
-      );
-  end if;
-end;
-$$;
+-- unaccent() is STABLE, so PostgreSQL does not allow it in an index
+-- expression. The trigger above enforces the same accent-insensitive
+-- uniqueness rule and uses an advisory lock to protect concurrent writes.
+drop index if exists public.idx_products_unique_normalized_name_category;
 
 create or replace function public.cancel_sale(
   p_sale_id uuid,

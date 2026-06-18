@@ -24,6 +24,9 @@ exception
   when duplicate_object then null;
 end $$;
 
+alter type public.payment_method add value if not exists 'cartao_alimentacao';
+alter type public.payment_method add value if not exists 'cartao_refeicao';
+
 do $$
 begin
   create type public.sale_status as enum ('completed', 'cancelled');
@@ -123,6 +126,9 @@ create table if not exists public.cash_registers (
   updated_at timestamptz not null default now()
 );
 
+alter table public.cash_registers
+  add column if not exists cash_difference numeric(12, 2) not null default 0;
+
 create table if not exists public.sales (
   id uuid primary key default gen_random_uuid(),
   cash_register_id uuid not null references public.cash_registers(id) on delete restrict,
@@ -131,10 +137,22 @@ create table if not exists public.sales (
   total_cost numeric(12, 2) not null default 0 check (total_cost >= 0),
   gross_profit numeric(12, 2) not null default 0,
   payment_method public.payment_method not null,
+  card_type text,
+  card_machine text,
   status public.sale_status not null default 'completed',
+  preparation_status text not null default 'aguardando',
   cancelled_at timestamptz,
   cancelled_by uuid references public.users(id) on delete set null,
   cancellation_reason text,
+  customer_name text,
+  customer_phone text,
+  delivery_address text,
+  delivery_neighborhood text,
+  delivery_reference text,
+  order_notes text,
+  order_type text not null default 'retirada',
+  delivery_fee numeric(12, 2) not null default 0 check (delivery_fee >= 0),
+  delivery_driver text,
   created_at timestamptz not null default now()
 );
 
@@ -149,6 +167,8 @@ create table if not exists public.sale_items (
   unit_cost numeric(12, 2) not null check (unit_cost >= 0),
   total_price numeric(12, 2) not null check (total_price >= 0),
   total_cost numeric(12, 2) not null check (total_cost >= 0),
+  modifiers jsonb not null default '[]'::jsonb,
+  item_notes text,
   created_at timestamptz not null default now()
 );
 
@@ -186,6 +206,20 @@ create table if not exists public.audit_logs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.print_jobs (
+  id uuid primary key default gen_random_uuid(),
+  order_number text not null,
+  order_payload jsonb not null,
+  status text not null default 'pending' check (status in ('pending', 'processing', 'printed', 'error')),
+  attempts integer not null default 0 check (attempts >= 0),
+  logs text[] not null default '{}'::text[],
+  error_message text,
+  created_by uuid references public.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  printed_at timestamptz
+);
+
 create index if not exists idx_products_category on public.products(category);
 create index if not exists idx_products_low_stock on public.products(active, track_stock, quantity, min_stock, max_stock);
 create index if not exists idx_sales_created_at on public.sales(created_at desc);
@@ -196,6 +230,7 @@ create index if not exists idx_stock_movements_product_created on public.stock_m
 create index if not exists idx_cash_movements_register_created on public.cash_movements(cash_register_id, created_at desc);
 create index if not exists idx_cash_movements_created_at on public.cash_movements(created_at desc);
 create index if not exists idx_audit_logs_created_at on public.audit_logs(created_at desc);
+create index if not exists idx_print_jobs_status_created on public.print_jobs(status, created_at);
 create unique index if not exists idx_one_open_cash_register_per_user
   on public.cash_registers(user_id)
   where status = 'open';
@@ -357,6 +392,7 @@ alter table public.sale_items enable row level security;
 alter table public.stock_movements enable row level security;
 alter table public.cash_movements enable row level security;
 alter table public.audit_logs enable row level security;
+alter table public.print_jobs enable row level security;
 
 grant usage on schema public to authenticated;
 grant select, insert, update, delete on all tables in schema public to authenticated;
@@ -502,6 +538,18 @@ create policy "audit_logs_insert_own"
 on public.audit_logs for insert
 to authenticated
 with check (user_id = (select auth.uid()) or public.is_admin());
+
+drop policy if exists "print_jobs_select_admin" on public.print_jobs;
+create policy "print_jobs_select_admin"
+on public.print_jobs for select
+to authenticated
+using (public.is_admin());
+
+drop policy if exists "print_jobs_insert_authenticated" on public.print_jobs;
+create policy "print_jobs_insert_authenticated"
+on public.print_jobs for insert
+to authenticated
+with check (created_by = (select auth.uid()) or public.is_admin());
 
 create or replace function public.open_cash_register(
   p_opening_amount numeric,
@@ -742,7 +790,18 @@ $$;
 create or replace function public.finalize_sale(
   p_cash_register_id uuid,
   p_payment_method public.payment_method,
-  p_items jsonb
+  p_card_type text default null,
+  p_card_machine text default null,
+  p_items jsonb default '[]'::jsonb,
+  p_customer_name text default null,
+  p_customer_phone text default null,
+  p_delivery_address text default null,
+  p_delivery_neighborhood text default null,
+  p_delivery_reference text default null,
+  p_order_notes text default null,
+  p_order_type text default 'retirada',
+  p_delivery_fee numeric default 0,
+  p_delivery_driver text default null
 )
 returns uuid
 language plpgsql
@@ -762,6 +821,11 @@ declare
   v_line_cost numeric(12, 2);
   v_total numeric(12, 2) := 0;
   v_total_cost numeric(12, 2) := 0;
+  v_card_type text := nullif(trim(coalesce(p_card_type, '')), '');
+  v_card_machine text := nullif(trim(coalesce(p_card_machine, '')), '');
+  v_order_type text := nullif(trim(coalesce(p_order_type, '')), '');
+  v_delivery_fee numeric(12, 2) := greatest(0, round(coalesce(p_delivery_fee, 0), 2));
+  v_delivery_driver text := nullif(trim(coalesce(p_delivery_driver, '')), '');
 begin
   if v_user_id is null then
     raise exception 'Usuario nao autenticado.';
@@ -777,6 +841,30 @@ begin
 
   if p_items is null or jsonb_array_length(p_items) = 0 then
     raise exception 'Venda sem itens.';
+  end if;
+
+  if p_payment_method = 'cartao' and v_card_type not in ('credito', 'debito') then
+    raise exception 'Informe credito ou debito para cartao.';
+  end if;
+
+  if p_payment_method <> 'cartao' then
+    v_card_type := null;
+  end if;
+
+  if v_order_type not in ('retirada', 'local', 'entrega') then
+    raise exception 'Tipo de atendimento invalido.';
+  end if;
+
+  if v_order_type <> 'entrega' then
+    v_delivery_fee := 0;
+    v_delivery_driver := null;
+    p_delivery_address := null;
+    p_delivery_neighborhood := null;
+    p_delivery_reference := null;
+  end if;
+
+  if v_order_type = 'entrega' and v_delivery_driver is null then
+    raise exception 'Informe o motoboy da entrega.';
   end if;
 
   select * into v_register
@@ -799,19 +887,47 @@ begin
   insert into public.sales (
     cash_register_id,
     user_id,
-    payment_method
+    payment_method,
+    card_type,
+    card_machine,
+    preparation_status,
+    customer_name,
+    customer_phone,
+    delivery_address,
+    delivery_neighborhood,
+    delivery_reference,
+    order_notes,
+    order_type,
+    delivery_fee,
+    delivery_driver
   )
   values (
     p_cash_register_id,
     v_user_id,
-    p_payment_method
+    p_payment_method,
+    v_card_type,
+    v_card_machine,
+    'aguardando',
+    nullif(trim(coalesce(p_customer_name, '')), ''),
+    nullif(trim(coalesce(p_customer_phone, '')), ''),
+    nullif(trim(coalesce(p_delivery_address, '')), ''),
+    nullif(trim(coalesce(p_delivery_neighborhood, '')), ''),
+    nullif(trim(coalesce(p_delivery_reference, '')), ''),
+    nullif(trim(coalesce(p_order_notes, '')), ''),
+    v_order_type,
+    v_delivery_fee,
+    v_delivery_driver
   )
   returning id into v_sale_id;
 
   for v_item in
-    select product_id, sum(quantity) as quantity
-    from jsonb_to_recordset(p_items) as x(product_id uuid, quantity numeric)
-    group by product_id
+    select *
+    from jsonb_to_recordset(p_items) as x(
+      product_id uuid,
+      quantity numeric,
+      modifiers jsonb,
+      item_notes text
+    )
   loop
     if v_item.quantity <= 0 then
       raise exception 'Quantidade invalida.';
@@ -849,7 +965,9 @@ begin
       unit_price,
       unit_cost,
       total_price,
-      total_cost
+      total_cost,
+      modifiers,
+      item_notes
     )
     values (
       v_sale_id,
@@ -860,7 +978,9 @@ begin
       v_product.sale_price,
       v_product.cost_price,
       v_line_total,
-      v_line_cost
+      v_line_cost,
+      coalesce(v_item.modifiers, '[]'::jsonb),
+      nullif(trim(coalesce(v_item.item_notes, '')), '')
     );
 
     if v_product.track_stock then
@@ -895,15 +1015,15 @@ begin
   end loop;
 
   update public.sales
-  set total_amount = v_total,
+  set total_amount = v_total + v_delivery_fee,
       total_cost = v_total_cost,
-      gross_profit = v_total - v_total_cost
+      gross_profit = (v_total + v_delivery_fee) - v_total_cost
   where id = v_sale_id;
 
   update public.cash_registers
-  set sales_amount = sales_amount + v_total,
+  set sales_amount = sales_amount + v_total + v_delivery_fee,
       expected_amount = case
-        when p_payment_method = 'dinheiro' then expected_amount + v_total
+        when p_payment_method = 'dinheiro' then expected_amount + v_total + v_delivery_fee
         else expected_amount
       end
   where id = p_cash_register_id;
@@ -915,10 +1035,19 @@ begin
     'sales',
     v_sale_id,
     jsonb_build_object(
-      'total_amount', v_total,
+      'total_amount', v_total + v_delivery_fee,
       'total_cost', v_total_cost,
-      'gross_profit', v_total - v_total_cost,
-      'payment_method', p_payment_method
+      'gross_profit', (v_total + v_delivery_fee) - v_total_cost,
+      'payment_method', p_payment_method,
+      'card_type', v_card_type,
+      'card_machine', v_card_machine,
+      'order_type', v_order_type,
+      'delivery_fee', v_delivery_fee,
+      'delivery_driver', v_delivery_driver,
+      'customer_name', nullif(trim(coalesce(p_customer_name, '')), ''),
+      'customer_phone', nullif(trim(coalesce(p_customer_phone, '')), ''),
+      'delivery_address', nullif(trim(coalesce(p_delivery_address, '')), ''),
+      'delivery_neighborhood', nullif(trim(coalesce(p_delivery_neighborhood, '')), '')
     )
   );
 
@@ -1173,7 +1302,22 @@ $$;
 grant execute on function public.open_cash_register(numeric, text) to authenticated;
 grant execute on function public.close_cash_register(uuid, numeric, text) to authenticated;
 grant execute on function public.register_cash_movement(uuid, public.cash_movement_type, numeric, text) to authenticated;
-grant execute on function public.finalize_sale(uuid, public.payment_method, jsonb) to authenticated;
+grant execute on function public.finalize_sale(
+  uuid,
+  public.payment_method,
+  text,
+  text,
+  jsonb,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  numeric,
+  text
+) to authenticated;
 grant execute on function public.cancel_sale(uuid, text) to authenticated;
 grant execute on function public.adjust_stock(uuid, numeric, public.stock_movement_type, text, numeric) to authenticated;
 

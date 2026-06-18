@@ -13,6 +13,7 @@ alter table public.sales
   add column if not exists preparation_status public.preparation_status not null default 'aguardando';
 
 alter table public.cash_registers
+  add column if not exists cash_difference numeric(12, 2) not null default 0,
   add column if not exists closing_cash_amount numeric(12, 2) not null default 0 check (closing_cash_amount >= 0),
   add column if not exists closing_credit_amount numeric(12, 2) not null default 0 check (closing_credit_amount >= 0),
   add column if not exists closing_debit_amount numeric(12, 2) not null default 0 check (closing_debit_amount >= 0),

@@ -25,12 +25,14 @@ export function Textarea({
 export function Label({
   children,
   htmlFor,
+  className,
 }: {
   children: React.ReactNode;
   htmlFor?: string;
+  className?: string;
 }) {
   return (
-    <label htmlFor={htmlFor} className="text-sm font-medium text-slate-300">
+    <label htmlFor={htmlFor} className={cn("text-sm font-medium text-slate-300", className)}>
       {children}
     </label>
   );

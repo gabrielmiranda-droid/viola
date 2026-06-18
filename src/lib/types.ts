@@ -1,5 +1,6 @@
 export type UserRole = "admin" | "caixa";
-export type PaymentMethod = "pix" | "dinheiro" | "cartao";
+export type PaymentMethod = "pix" | "dinheiro" | "cartao" | "cartao_alimentacao" | "cartao_refeicao";
+export type OrderType = "retirada" | "local" | "entrega";
 export type CardType = "credito" | "debito";
 export type SaleStatus = "completed" | "cancelled";
 export type PreparationStatus = "aguardando" | "preparando" | "pronto" | "entregue";
@@ -64,6 +65,8 @@ export type CashMovement = {
 export type SaleItemInput = {
   productId: string;
   quantity: number;
+  modifiers?: string[];
+  notes?: string | null;
 };
 
 export type RegisterSale = {
@@ -75,6 +78,15 @@ export type RegisterSale = {
   card_type?: CardType | null;
   card_machine?: string | null;
   preparation_status?: PreparationStatus | null;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  delivery_address?: string | null;
+  delivery_neighborhood?: string | null;
+  delivery_reference?: string | null;
+  order_notes?: string | null;
+  order_type?: OrderType | null;
+  delivery_fee?: number | null;
+  delivery_driver?: string | null;
 };
 
 export type RegisterSaleItem = {
@@ -82,6 +94,8 @@ export type RegisterSaleItem = {
   sale_id: string;
   product_name_snapshot: string;
   quantity: number;
+  modifiers?: string[] | null;
+  item_notes?: string | null;
 };
 
 export type TerminalClosing = {

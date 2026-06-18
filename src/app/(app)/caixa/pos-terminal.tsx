@@ -57,6 +57,7 @@ import type {
   CardType,
   CashMovement,
   CashRegister,
+  OrderType,
   PaymentMethod,
   Product,
   RegisterSale,
@@ -72,6 +73,8 @@ import {
 type CartItem = {
   product: Product;
   quantity: number;
+  modifiersText: string;
+  notes: string;
 };
 
 type TerminalDraft = {
@@ -95,6 +98,11 @@ type CashMovementAuditRow = {
 };
 
 type CashTab = "vendas" | "movimentacao" | "fechamento";
+type DriverSummary = {
+  driver: string;
+  deliveries: number;
+  totalFee: number;
+};
 
 const cashTabs: Array<{
   value: CashTab;
@@ -118,8 +126,22 @@ const terminalDefaults = ["Principal", "Cielo", "Stone", "Mercado Pago"];
 const paymentOptions: Array<{ value: PaymentMethod; label: string }> = [
   { value: "pix", label: "PIX" },
   { value: "dinheiro", label: "Dinheiro" },
-  { value: "cartao", label: "Cartao" },
+  { value: "cartao", label: "Credito/Debito" },
+  { value: "cartao_alimentacao", label: "Alimentacao" },
+  { value: "cartao_refeicao", label: "Refeicao" },
 ];
+
+const orderTypeOptions: Array<{ value: OrderType; label: string; description: string }> = [
+  { value: "retirada", label: "Retirada", description: "Cliente retira no balcao" },
+  { value: "local", label: "Consumir no local", description: "Pedido fica no estabelecimento" },
+  { value: "entrega", label: "Entrega", description: "Precisa endereco e motoboy" },
+];
+
+const cardPaymentMethods = new Set<PaymentMethod>([
+  "cartao",
+  "cartao_alimentacao",
+  "cartao_refeicao",
+]);
 
 const movementReasons = {
   entrada: ["Reforco de troco", "Devolucao recebida", "Outro recebimento"],
@@ -129,6 +151,27 @@ const movementReasons = {
 function asNumber(value: string | number | null | undefined) {
   const number = Number(value ?? 0);
   return Number.isFinite(number) ? number : 0;
+}
+
+function modifiersFromText(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function deliverySummaries(sales: RegisterSale[]): DriverSummary[] {
+  const rows = sales
+    .filter((sale) => sale.status === "completed" && sale.order_type === "entrega")
+    .reduce<Record<string, DriverSummary>>((acc, sale) => {
+      const driver = sale.delivery_driver?.trim() || "Sem motoboy";
+      acc[driver] ??= { driver, deliveries: 0, totalFee: 0 };
+      acc[driver].deliveries += 1;
+      acc[driver].totalFee += Number(sale.delivery_fee ?? 0);
+      return acc;
+    }, {});
+
+  return Object.values(rows).sort((a, b) => b.deliveries - a.deliveries);
 }
 
 function normalizeProduct(product: Product): Product {
@@ -155,6 +198,15 @@ function normalizeSale(sale: Partial<RegisterSale>): RegisterSale {
     card_type: sale.card_type ?? null,
     card_machine: sale.card_machine ?? null,
     preparation_status: sale.preparation_status ?? "aguardando",
+    customer_name: sale.customer_name ?? null,
+    customer_phone: sale.customer_phone ?? null,
+    delivery_address: sale.delivery_address ?? null,
+    delivery_neighborhood: sale.delivery_neighborhood ?? null,
+    delivery_reference: sale.delivery_reference ?? null,
+    order_notes: sale.order_notes ?? null,
+    order_type: sale.order_type ?? "retirada",
+    delivery_fee: sale.delivery_fee ?? 0,
+    delivery_driver: sale.delivery_driver ?? null,
   };
 }
 
@@ -322,7 +374,10 @@ function CashRegisterSummary({
   const completed = registerSales.filter((sale) => sale.status === "completed");
   const cashSales = salesByPayment(registerSales, "dinheiro");
   const pixSales = salesByPayment(registerSales, "pix");
-  const cardSales = salesByPayment(registerSales, "cartao");
+  const cardSales =
+    salesByPayment(registerSales, "cartao")
+    + salesByPayment(registerSales, "cartao_alimentacao")
+    + salesByPayment(registerSales, "cartao_refeicao");
   const cashIn = movementsByType(cashMovements, "entrada");
   const cashOut = movementsByType(cashMovements, "saida");
   const opening = Number(register.opening_amount);
@@ -546,10 +601,16 @@ function CashPanel({
 
   const cashSales = salesByPayment(registerSales, "dinheiro");
   const pixSales = salesByPayment(registerSales, "pix");
-  const cardSales = salesByPayment(registerSales, "cartao");
+  const voucherSales =
+    salesByPayment(registerSales, "cartao_alimentacao")
+    + salesByPayment(registerSales, "cartao_refeicao");
+  const cardSales = salesByPayment(registerSales, "cartao") + voucherSales;
   const creditSales = cardSalesByType(registerSales, "credito");
   const debitSales = cardSalesByType(registerSales, "debito");
-  const unknownCardSales = cardSalesWithoutType(registerSales);
+  const unknownCardSales = cardSalesWithoutType(registerSales) + voucherSales;
+  const driverRows = deliverySummaries(registerSales);
+  const deliveryCount = driverRows.reduce((sum, row) => sum + row.deliveries, 0);
+  const deliveryFeeTotal = driverRows.reduce((sum, row) => sum + row.totalFee, 0);
   const cashIn = movementsByType(cashMovements, "entrada");
   const cashOut = movementsByType(cashMovements, "saida");
   const cashFlow = cashFlowSummary({
@@ -916,6 +977,39 @@ function CashPanel({
             <input type="hidden" name="credit_amount" value={countedCredit.toFixed(2)} />
             <input type="hidden" name="debit_amount" value={countedDebit.toFixed(2)} />
             <input type="hidden" name="pix_amount" value={countedPix.toFixed(2)} />
+
+            <div className="mb-4 rounded-xl border border-green-400/20 bg-green-400/5 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.1em] text-green-200">
+                    Entregas e motoboys
+                  </p>
+                  <p className="mt-1 text-sm text-muted">
+                    Use este resumo para pagar as entregas no fim da noite.
+                  </p>
+                </div>
+                <Badge variant="success">
+                  {quantity(deliveryCount)} entrega(s) / {money(deliveryFeeTotal)}
+                </Badge>
+              </div>
+              <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                {driverRows.length ? (
+                  driverRows.map((row) => (
+                    <div key={row.driver} className="rounded-lg border border-line bg-panel p-3">
+                      <p className="font-black">{row.driver}</p>
+                      <p className="mt-1 text-sm text-muted">
+                        {quantity(row.deliveries)} entrega(s)
+                      </p>
+                      <p className="mt-2 text-lg font-black text-green-200">
+                        {money(row.totalFee)}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted">Nenhuma entrega neste caixa.</p>
+                )}
+              </div>
+            </div>
 
             <div className="mb-4 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
               <div className="rounded-xl border border-accent/25 bg-accent/5 p-4">
@@ -1301,6 +1395,15 @@ export function PosTerminal({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("pix");
   const [cardType, setCardType] = useState<CardType>("credito");
   const [cardMachine, setCardMachine] = useState("Principal");
+  const [orderType, setOrderType] = useState<OrderType>("retirada");
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [deliveryNeighborhood, setDeliveryNeighborhood] = useState("");
+  const [deliveryReference, setDeliveryReference] = useState("");
+  const [deliveryFee, setDeliveryFee] = useState("10");
+  const [deliveryDriver, setDeliveryDriver] = useState("");
+  const [orderNotes, setOrderNotes] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const liveRegisterIdRef = useRef(openRegister?.id);
@@ -1356,7 +1459,7 @@ export function PosTerminal({
   const fetchRegisterData = useCallback(async (cashRegisterId: string) => {
     const salesResult = await supabase
       .from("sales")
-      .select("id,total_amount,payment_method,status,created_at,card_type,card_machine,preparation_status")
+      .select("id,total_amount,payment_method,status,created_at,card_type,card_machine,preparation_status,customer_name,customer_phone,delivery_address,delivery_neighborhood,delivery_reference,order_notes,order_type,delivery_fee,delivery_driver")
       .eq("cash_register_id", cashRegisterId)
       .order("created_at", { ascending: false });
 
@@ -1609,8 +1712,11 @@ export function PosTerminal({
     (sum, item) => sum + Number(item.product.sale_price) * item.quantity,
     0,
   );
+  const deliveryFeeValue = orderType === "entrega" ? asNumber(deliveryFee || "10") : 0;
+  const orderTotal = total + deliveryFeeValue;
   const cartQuantity = cart.reduce((sum, item) => sum + item.quantity, 0);
   const completedSalesCount = liveSales.filter((sale) => sale.status === "completed").length;
+  const isCardPayment = cardPaymentMethods.has(paymentMethod);
 
   function addProduct(product: Product) {
     const tracksStock = productTracksStock(product);
@@ -1628,8 +1734,16 @@ export function PosTerminal({
         );
       }
 
-      return [...current, { product, quantity: 1 }];
+      return [...current, { product, quantity: 1, modifiersText: "", notes: "" }];
     });
+  }
+
+  function updateCartItem(productId: string, patch: Partial<Pick<CartItem, "modifiersText" | "notes">>) {
+    setCart((current) =>
+      current.map((item) =>
+        item.product.id === productId ? { ...item, ...patch } : item,
+      ),
+    );
   }
 
   function decrement(productId: string) {
@@ -1653,15 +1767,37 @@ export function PosTerminal({
       return;
     }
 
+    if (orderType === "entrega" && !deliveryDriver.trim()) {
+      setMessage("Informe o motoboy da entrega.");
+      showToast({
+        title: "Motoboy obrigatorio",
+        message: "Escolha ou digite quem fez a entrega.",
+        tone: "danger",
+      });
+      return;
+    }
+
     startTransition(async () => {
+      const isCardPayment = cardPaymentMethods.has(paymentMethod);
       const result = await finalizeSaleAction({
         cashRegisterId: liveRegister.id,
         paymentMethod,
         cardType: paymentMethod === "cartao" ? cardType : null,
-        cardMachine: paymentMethod === "cartao" ? cardMachine : null,
+        cardMachine: isCardPayment ? cardMachine : null,
+        orderType,
+        customerName,
+        customerPhone,
+        deliveryAddress: orderType === "entrega" ? deliveryAddress : "",
+        deliveryNeighborhood: orderType === "entrega" ? deliveryNeighborhood : "",
+        deliveryReference: orderType === "entrega" ? deliveryReference : "",
+        deliveryFee: deliveryFeeValue,
+        deliveryDriver: orderType === "entrega" ? deliveryDriver : "",
+        orderNotes,
         items: cart.map((item) => ({
           productId: item.product.id,
           quantity: item.quantity,
+          modifiers: modifiersFromText(item.modifiersText),
+          notes: item.notes,
         })),
       });
 
@@ -1674,6 +1810,15 @@ export function PosTerminal({
 
       if (result.ok) {
         setCart([]);
+        setOrderType("retirada");
+        setCustomerName("");
+        setCustomerPhone("");
+        setDeliveryAddress("");
+        setDeliveryNeighborhood("");
+        setDeliveryReference("");
+        setDeliveryFee("10");
+        setDeliveryDriver("");
+        setOrderNotes("");
         void fetchProducts();
         void fetchRegisterData(liveRegister.id);
       } else {
@@ -1716,7 +1861,7 @@ export function PosTerminal({
       ) : null}
 
       {activeCashTab === "vendas" ? (
-        <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_430px]">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_430px]">
         <section className="min-w-0 space-y-3">
           {!liveRegister ? (
             <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-4 text-amber-100">
@@ -1860,7 +2005,7 @@ export function PosTerminal({
           )}
         </section>
 
-        <aside className="2xl:sticky 2xl:top-4 2xl:self-start">
+        <aside className="lg:sticky lg:top-4 lg:self-start">
           <Card className="overflow-hidden border-accent/25 bg-panel p-0">
             <div className="border-b border-line bg-panel-strong/75 p-4">
               <div className="flex items-start justify-between gap-3">
@@ -1876,7 +2021,7 @@ export function PosTerminal({
                   </div>
                 </div>
                 <p className="text-right text-3xl font-black leading-none text-accent">
-                  {money(total)}
+                  {money(orderTotal)}
                 </p>
               </div>
             </div>
@@ -1940,6 +2085,23 @@ export function PosTerminal({
                             {money(item.quantity * Number(item.product.sale_price))}
                           </p>
                         </div>
+                        <div className="mt-3 space-y-2">
+                          <Input
+                            value={item.modifiersText}
+                            onChange={(event) =>
+                              updateCartItem(item.product.id, { modifiersText: event.target.value })
+                            }
+                            placeholder="Adicionais: Bacon, Ovo, Cheddar"
+                          />
+                          <Textarea
+                            value={item.notes}
+                            onChange={(event) =>
+                              updateCartItem(item.product.id, { notes: event.target.value })
+                            }
+                            placeholder="Observacao do item"
+                            rows={2}
+                          />
+                        </div>
                       </motion.div>
                     ))}
                   </AnimatePresence>
@@ -1947,9 +2109,114 @@ export function PosTerminal({
               )}
             </div>
 
+            {orderType === "entrega" ? (
+              <div className="mx-4 mb-4 rounded-lg border border-green-400/20 bg-green-400/5 p-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted">Produtos</span>
+                  <strong>{money(total)}</strong>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <span className="text-muted">Taxa de entrega</span>
+                  <strong className="text-green-200">{money(deliveryFeeValue)}</strong>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="border-t border-line p-4">
+              <Label>Tipo de atendimento</Label>
+              <div className="mt-2 grid gap-2">
+                {orderTypeOptions.map((option) => {
+                  const active = orderType === option.value;
+
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => {
+                        setOrderType(option.value);
+                        if (option.value === "entrega" && !deliveryFee.trim()) {
+                          setDeliveryFee("10");
+                        }
+                      }}
+                      className={cn(
+                        "rounded-lg border p-3 text-left transition",
+                        active
+                          ? "border-accent bg-accent text-white"
+                          : "border-line bg-panel-strong text-slate-300 hover:bg-white/6",
+                      )}
+                    >
+                      <span className="block text-sm font-black">{option.label}</span>
+                      <span className={cn("mt-1 block text-xs", active ? "text-blue-100" : "text-muted")}>
+                        {option.description}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <Label className="mt-4 block">Cliente</Label>
+              <div className="mt-2 grid gap-2">
+                <Input
+                  value={customerName}
+                  onChange={(event) => setCustomerName(event.target.value)}
+                  placeholder="Nome do cliente"
+                />
+                <Input
+                  value={customerPhone}
+                  onChange={(event) => setCustomerPhone(event.target.value)}
+                  placeholder="Telefone"
+                />
+                {orderType === "entrega" ? (
+                  <>
+                    <Input
+                      value={deliveryAddress}
+                      onChange={(event) => setDeliveryAddress(event.target.value)}
+                      placeholder="Endereco"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input
+                        value={deliveryNeighborhood}
+                        onChange={(event) => setDeliveryNeighborhood(event.target.value)}
+                        placeholder="Bairro"
+                      />
+                      <Input
+                        value={deliveryReference}
+                        onChange={(event) => setDeliveryReference(event.target.value)}
+                        placeholder="Referencia"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input
+                        value={deliveryFee}
+                        onChange={(event) => setDeliveryFee(event.target.value)}
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="Taxa de entrega"
+                      />
+                      <Input
+                        value={deliveryDriver}
+                        onChange={(event) => setDeliveryDriver(event.target.value)}
+                        placeholder="Motoboy"
+                      />
+                    </div>
+                    <p className="text-xs text-muted">
+                      Taxa padrao: R$ 10,00. O motoboy sera somado no fechamento.
+                    </p>
+                  </>
+                ) : null}
+                <Textarea
+                  value={orderNotes}
+                  onChange={(event) => setOrderNotes(event.target.value)}
+                  placeholder="Observacao geral do pedido"
+                  rows={2}
+                />
+              </div>
+            </div>
+
             <div className="border-t border-line p-4">
               <Label>Pagamento</Label>
-              <div className="mt-2 grid grid-cols-3 gap-2">
+              <div className="mt-2 grid grid-cols-2 gap-2 2xl:grid-cols-3">
                 {paymentOptions.map((option) => {
                   const active = paymentMethod === option.value;
 
@@ -1972,8 +2239,9 @@ export function PosTerminal({
               </div>
             </div>
 
-            {paymentMethod === "cartao" ? (
+            {isCardPayment ? (
               <div className="mx-4 rounded-lg border border-line bg-panel-strong p-3">
+                {paymentMethod === "cartao" ? (
                 <div className="grid grid-cols-2 gap-2">
                   {(["credito", "debito"] as CardType[]).map((type) => (
                     <button
@@ -1992,6 +2260,13 @@ export function PosTerminal({
                     </button>
                   ))}
                 </div>
+                ) : (
+                  <p className="rounded-lg border border-green-400/25 bg-green-400/10 p-3 text-sm font-semibold text-green-100">
+                    {paymentMethod === "cartao_alimentacao"
+                      ? "Cartao alimentacao selecionado."
+                      : "Cartao refeicao selecionado."}
+                  </p>
+                )}
                 <div className="mt-3 space-y-2">
                   <Label htmlFor="card_machine">Maquininha</Label>
                   <Select
