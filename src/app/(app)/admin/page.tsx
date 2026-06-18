@@ -20,6 +20,7 @@ import {
   ArrowRight,
   Banknote,
   BarChart2,
+  Bike,
   CheckCircle,
   Package,
   ReceiptText,
@@ -41,6 +42,8 @@ type SaleRow = {
   user_id: string;
   cancelled_at: string | null;
   cancellation_reason: string | null;
+  delivery_driver?: string | null;
+  delivery_fee?: number | null;
   users?: { name: string | null; email: string | null } | null;
 };
 
@@ -135,7 +138,7 @@ export default async function AdminDashboardPage() {
     fetchAllPages<SaleRow>((from, to) =>
       supabase
         .from("sales")
-        .select("id,cash_register_id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,users:users!sales_user_id_fkey(name,email)")
+        .select("id,cash_register_id,total_amount,gross_profit,payment_method,user_id,cancelled_at,cancellation_reason,delivery_driver,delivery_fee,users:users!sales_user_id_fkey(name,email)")
         .eq("status", "completed")
         .gte("created_at", todayStart)
         .lte("created_at", today.end)
@@ -362,6 +365,22 @@ export default async function AdminDashboardPage() {
     .slice(0, 6);
   const topProductTotal = topProducts[0]?.total || 1;
 
+  const motoboys = Object.values(
+    todaySales
+      .filter((sale) => sale.delivery_driver)
+      .reduce<Record<string, { name: string; fee: number; count: number }>>(
+        (acc, sale) => {
+          const name = sale.delivery_driver!;
+          acc[name] ??= { name, fee: 0, count: 0 };
+          acc[name].fee += Number(sale.delivery_fee ?? 0);
+          acc[name].count += 1;
+          return acc;
+        },
+        {},
+      ),
+  ).sort((a, b) => b.fee - a.fee);
+  const totalDeliveryFees = sumMoney(motoboys.map((m) => m.fee));
+
   return (
     <Panel>
       <SectionHeader
@@ -487,6 +506,42 @@ export default async function AdminDashboardPage() {
       <ResetHistoryForm />
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
+        <Card className="border-accent/20">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-black">Motoboys de hoje</h2>
+              <p className="text-sm text-muted">Taxa de entrega acumulada por entregador.</p>
+            </div>
+            <Badge variant={motoboys.length ? "info" : "neutral"}>
+              {motoboys.length} entregador(es)
+            </Badge>
+          </div>
+          {motoboys.length ? (
+            <div className="space-y-2">
+              {motoboys.map((motoboy) => (
+                <div key={motoboy.name} className="flex items-center gap-3 rounded-lg border border-line bg-panel-strong p-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent ring-1 ring-accent/20">
+                    <Bike className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-semibold">{motoboy.name}</p>
+                    <p className="text-sm text-muted">{motoboy.count} entrega(s)</p>
+                  </div>
+                  <strong className="shrink-0 text-accent">{money(motoboy.fee)}</strong>
+                </div>
+              ))}
+              {motoboys.length > 1 && (
+                <div className="flex justify-between rounded-lg border border-accent/20 bg-accent/5 px-3 py-2 text-sm">
+                  <span className="text-muted">Total a pagar</span>
+                  <strong className="text-accent">{money(totalDeliveryFees)}</strong>
+                </div>
+              )}
+            </div>
+          ) : (
+            <EmptyState icon={<Bike className="h-5 w-5" />} title="Sem entregas hoje" description="Nenhuma venda do tipo entrega registrada." />
+          )}
+        </Card>
+
         <Card>
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="font-black">Vendas por funcionario</h2>
